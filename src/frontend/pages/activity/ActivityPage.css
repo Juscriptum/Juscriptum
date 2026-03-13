@@ -1,0 +1,217 @@
+.activity-page {
+    max-width: 1280px;
+    margin: 0 auto;
+}
+
+.activity-loading {
+    min-height: 18rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.activity-period-switcher {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.activity-period-switcher .btn.is-current {
+    background: var(--color-accent-soft);
+    border-color: rgba(61, 118, 209, 0.24);
+    color: var(--color-accent-700);
+}
+
+.activity-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.activity-summary-card,
+.activity-feed-panel,
+.activity-card {
+    background: #FFFFFF;
+    border: 1px solid #E5E7EB;
+    border-radius: 14px;
+    box-shadow: 0 10px 30px rgba(15, 23, 42, 0.05);
+}
+
+.activity-summary-card {
+    padding: 1rem;
+}
+
+.activity-summary-card span {
+    display: block;
+    color: var(--color-ink-500);
+    font-size: var(--text-caption);
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.activity-summary-card strong {
+    font-size: var(--text-display);
+    color: var(--color-ink-950);
+    line-height: var(--leading-tight);
+}
+
+.activity-layout-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
+    gap: 20px;
+}
+
+.activity-feed-panel,
+.activity-card {
+    padding: 1rem;
+}
+
+.activity-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.activity-panel-header h3 {
+    margin: 0;
+    font-size: var(--text-title);
+    color: var(--color-ink-950);
+}
+
+.activity-panel-header span {
+    color: var(--color-ink-500);
+    font-size: var(--text-caption);
+}
+
+.activity-day-group + .activity-day-group {
+    margin-top: 20px;
+}
+
+.activity-day-label {
+    font-size: var(--text-caption);
+    font-weight: 600;
+    color: var(--color-ink-700);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+}
+
+.activity-day-list {
+    display: grid;
+    gap: 12px;
+}
+
+.activity-entry {
+    display: flex;
+    gap: 12px;
+    padding: 14px 16px;
+    border-radius: 12px;
+    background: #F8FAFC;
+    border: 1px solid #E2E8F0;
+}
+
+.activity-entry-marker {
+    width: 10px;
+    border-radius: 999px;
+    flex-shrink: 0;
+}
+
+.activity-tone-create { background: #10B981; }
+.activity-tone-update { background: #3B82F6; }
+.activity-tone-delete { background: #EF4444; }
+.activity-tone-auth { background: #8B5CF6; }
+
+.activity-entry-body {
+    min-width: 0;
+    width: 100%;
+}
+
+.activity-entry-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 6px;
+}
+
+.activity-entry-head strong {
+    color: var(--color-ink-950);
+}
+
+.activity-entry-head span,
+.activity-entry-text {
+    color: var(--color-ink-700);
+    font-size: var(--text-md);
+}
+
+.activity-entry-text span {
+    color: var(--color-ink-950);
+    font-weight: 600;
+}
+
+.activity-side-panel {
+    display: grid;
+    gap: 20px;
+    align-self: start;
+}
+
+.activity-side-item {
+    display: grid;
+    gap: 4px;
+    padding: 12px 0;
+    border-top: 1px solid #E5E7EB;
+    color: inherit;
+    text-decoration: none;
+}
+
+.activity-side-item:first-of-type {
+    border-top: 0;
+    padding-top: 0;
+}
+
+.activity-side-item strong {
+    color: var(--color-ink-950);
+    font-size: var(--text-md);
+}
+
+.activity-side-item span {
+    color: var(--color-ink-500);
+    font-size: var(--text-caption);
+}
+
+.activity-link-item:hover strong {
+    color: var(--color-accent-700);
+}
+
+.activity-empty {
+    color: var(--color-ink-500);
+    font-size: var(--text-md);
+    padding: 16px 0;
+}
+
+.side-empty {
+    padding: 0;
+}
+
+@media (max-width: 1024px) {
+    .activity-summary-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .activity-layout-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 640px) {
+    .activity-summary-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .activity-entry-head {
+        flex-direction: column;
+    }
+}

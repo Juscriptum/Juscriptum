@@ -1,0 +1,334 @@
+# ============================================
+# Kubernetes CronJob - Database Backup
+# ============================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: postgres-backup
+  namespace: law-organizer
+spec:
+  schedule: "0 2 * * *"  # Daily at 2 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 3600
+      template:
+        metadata:
+          labels:
+            app: law-organizer
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            fsGroup: 1000
+
+          containers:
+            - name: backup
+              image: postgres:16-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_FILE="law_organizer_${TIMESTAMP}.sql.gz"
+
+                  echo "Starting backup: ${BACKUP_FILE}"
+
+                  # Create backup
+                  PGPASSWORD="${DB_PASSWORD}" pg_dump \
+                    -h "${DB_HOST}" \
+                    -U "${DB_USER}" \
+                    -d "${DB_NAME}" \
+                    -F p \
+                    --no-owner \
+                    --no-acl | gzip > "/backup/${BACKUP_FILE}"
+
+                  # Encrypt backup (if encryption key provided)
+                  if [ -n "${BACKUP_ENCRYPTION_KEY}" ]; then
+                    openssl enc -aes-256-cbc \
+                      -salt \
+                      -in "/backup/${BACKUP_FILE}" \
+                      -out "/backup/${BACKUP_FILE}.enc" \
+                      -pass pass:"${BACKUP_ENCRYPTION_KEY}"
+                    rm "/backup/${BACKUP_FILE}"
+                    BACKUP_FILE="${BACKUP_FILE}.enc"
+                  fi
+
+                  # Upload to S3
+                  aws s3 cp "/backup/${BACKUP_FILE}" \
+                    "s3://${S3_BUCKET}/database/${BACKUP_FILE}" \
+                    --storage-class STANDARD_IA
+
+                  # Cleanup old backups (keep last 30 days)
+                  find /backup -name "*.gz*" -type f -mtime +30 -delete
+
+                  echo "Backup completed: ${BACKUP_FILE}"
+
+              env:
+                - name: DB_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-secret
+                      key: host
+                - name: DB_USER
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-secret
+                      key: user
+                - name: DB_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-secret
+                      key: password
+                - name: DB_NAME
+                  valueFrom:
+                    secretKeyRef:
+                      name: database-secret
+                      key: name
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-secret-access-key
+                - name: AWS_DEFAULT_REGION
+                  value: "eu-north-1"
+                - name: S3_BUCKET
+                  value: "law-organizer-backups"
+                - name: BACKUP_ENCRYPTION_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: backup-secrets
+                      key: encryption-key
+                      optional: true
+
+              resources:
+                requests:
+                  memory: "256Mi"
+                  cpu: "100m"
+                limits:
+                  memory: "512Mi"
+                  cpu: "500m"
+
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+
+          volumes:
+            - name: backup-storage
+              emptyDir:
+                sizeLimit: 10Gi
+---
+# ============================================
+# Kubernetes CronJob - Redis Backup
+# ============================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: redis-backup
+  namespace: law-organizer
+spec:
+  schedule: "0 3 * * *"  # Daily at 3 AM
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      activeDeadlineSeconds: 1800
+      template:
+        metadata:
+          labels:
+            app: law-organizer
+            component: backup
+        spec:
+          restartPolicy: OnFailure
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+
+          containers:
+            - name: backup
+              image: redis:7-alpine
+              command:
+                - /bin/sh
+                - -c
+                - |
+                  set -e
+
+                  TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+                  BACKUP_FILE="redis_${TIMESTAMP}.rdb.gz"
+
+                  echo "Starting Redis backup: ${BACKUP_FILE}"
+
+                  # Trigger Redis BGSAVE
+                  redis-cli -h "${REDIS_HOST}" -p "${REDIS_PORT}" -a "${REDIS_PASSWORD}" BGSAVE
+
+                  # Wait for backup to complete
+                  sleep 10
+
+                  # Copy and compress
+                  gzip -c /data/dump.rdb > "/backup/${BACKUP_FILE}"
+
+                  # Upload to S3
+                  aws s3 cp "/backup/${BACKUP_FILE}" \
+                    "s3://${S3_BUCKET}/redis/${BACKUP_FILE}" \
+                    --storage-class STANDARD_IA
+
+                  echo "Redis backup completed: ${BACKUP_FILE}"
+
+              env:
+                - name: REDIS_HOST
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-secret
+                      key: host
+                - name: REDIS_PORT
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-secret
+                      key: port
+                - name: REDIS_PASSWORD
+                  valueFrom:
+                    secretKeyRef:
+                      name: redis-secret
+                      key: password
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-secret-access-key
+                - name: AWS_DEFAULT_REGION
+                  value: "eu-north-1"
+                - name: S3_BUCKET
+                  value: "law-organizer-backups"
+
+              resources:
+                requests:
+                  memory: "128Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "256Mi"
+                  cpu: "200m"
+
+              volumeMounts:
+                - name: backup-storage
+                  mountPath: /backup
+
+          volumes:
+            - name: backup-storage
+              emptyDir:
+                sizeLimit: 2Gi
+---
+# ============================================
+# Backup Retention Job
+# ============================================
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: backup-retention
+  namespace: law-organizer
+spec:
+  schedule: "0 4 * * 0"  # Weekly on Sunday at 4 AM
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          restartPolicy: OnFailure
+          containers:
+            - name: retention
+              image: amazon/aws-cli:latest
+              command:
+                - /bin/bash
+                - -c
+                - |
+                  set -e
+
+                  RETENTION_DAYS=30
+
+                  echo "Cleaning up backups older than ${RETENTION_DAYS} days"
+
+                  # Database backups
+                  aws s3 ls "s3://${S3_BUCKET}/database/" | while read -r line; do
+                    FILE_DATE=$(echo "$line" | awk '{print $1" "$2}')
+                    FILE_NAME=$(echo "$line" | awk '{print $4}')
+
+                    if [ -n "$FILE_NAME" ]; then
+                      FILE_AGE=$(( ($(date +%s) - $(date -d "$FILE_DATE" +%s)) / 86400 ))
+
+                      if [ "$FILE_AGE" -gt "$RETENTION_DAYS" ]; then
+                        echo "Deleting old backup: ${FILE_NAME}"
+                        aws s3 rm "s3://${S3_BUCKET}/database/${FILE_NAME}"
+                      fi
+                    fi
+                  done
+
+                  # Redis backups
+                  aws s3 ls "s3://${S3_BUCKET}/redis/" | while read -r line; do
+                    FILE_DATE=$(echo "$line" | awk '{print $1" "$2}')
+                    FILE_NAME=$(echo "$line" | awk '{print $4}')
+
+                    if [ -n "$FILE_NAME" ]; then
+                      FILE_AGE=$(( ($(date +%s) - $(date -d "$FILE_DATE" +%s)) / 86400 ))
+
+                      if [ "$FILE_AGE" -gt "$RETENTION_DAYS" ]; then
+                        echo "Deleting old backup: ${FILE_NAME}"
+                        aws s3 rm "s3://${S3_BUCKET}/redis/${FILE_NAME}"
+                      fi
+                    fi
+                  done
+
+                  echo "Backup retention cleanup completed"
+
+              env:
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-access-key-id
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-secrets
+                      key: aws-secret-access-key
+                - name: AWS_DEFAULT_REGION
+                  value: "eu-north-1"
+                - name: S3_BUCKET
+                  value: "law-organizer-backups"
+
+              resources:
+                requests:
+                  memory: "64Mi"
+                  cpu: "50m"
+                limits:
+                  memory: "128Mi"
+                  cpu: "100m"
+---
+# ============================================
+# Secret for Backup Encryption
+# ============================================
+apiVersion: v1
+kind: Secret
+metadata:
+  name: backup-secrets
+  namespace: law-organizer
+type: Opaque
+stringData:
+  encryption-key: "CHANGE_ME_USE_SEALED_SECRETS"

@@ -1,0 +1,221 @@
+/* Login Page Styles */
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(circle at 10% 10%, rgba(87, 142, 255, 0.24), transparent 24%),
+    radial-gradient(circle at 88% 16%, rgba(241, 210, 141, 0.16), transparent 18%),
+    linear-gradient(135deg, #0b1526 0%, #122543 52%, #f1eee6 52%, #f1eee6 100%);
+  padding: 1.5rem;
+}
+
+.login-container {
+  width: 100%;
+  max-width: 1180px;
+  display: grid;
+  grid-template-columns: minmax(320px, 0.9fr) minmax(360px, 420px);
+  gap: 1.25rem;
+  align-items: stretch;
+}
+
+.login-showcase,
+.login-card {
+  border-radius: 1.75rem;
+  overflow: hidden;
+}
+
+.login-showcase {
+  padding: clamp(2rem, 4vw, 3.5rem);
+  background:
+    linear-gradient(180deg, rgba(12, 24, 44, 0.92) 0%, rgba(11, 20, 38, 0.84) 100%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 28px 72px rgba(5, 12, 22, 0.22);
+  color: #edf2ff;
+}
+
+.login-showcase-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0 0.9rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: #d3e2ff;
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.login-showcase-title {
+  max-width: 10ch;
+  margin: 1.1rem 0 1rem;
+  color: #f7f5ef;
+  font-family: "Cormorant Garamond", Georgia, serif;
+  font-size: clamp(2.5rem, 5vw, 4.4rem);
+  font-weight: 700;
+  line-height: 0.94;
+  letter-spacing: -0.05em;
+}
+
+.login-showcase-text {
+  max-width: 52ch;
+  color: rgba(237, 242, 255, 0.76);
+  font-size: 1rem;
+  line-height: 1.7;
+}
+
+.login-showcase-list {
+  display: grid;
+  gap: 0.85rem;
+  margin: 1.5rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.login-showcase-list li {
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: rgba(237, 242, 255, 0.8);
+  line-height: 1.55;
+}
+
+.login-card {
+  align-self: center;
+  background: rgba(255, 253, 248, 0.96);
+  border: 1px solid rgba(19, 33, 50, 0.08);
+  box-shadow: 0 24px 56px rgba(18, 32, 50, 0.12);
+  padding: 2.2rem;
+}
+
+.login-logo {
+  display: block;
+  margin: 0 auto 1rem;
+}
+
+.login-title {
+  margin: 0 0 0.4rem;
+  color: var(--color-ink-950);
+  font-family: var(--font-sans);
+  font-size: var(--text-display);
+  font-weight: 700;
+  line-height: var(--leading-tight);
+  text-align: center;
+}
+
+.login-subtitle {
+  margin: 0 0 1.5rem;
+  color: var(--color-ink-500);
+  font-size: var(--text-md);
+  text-align: center;
+}
+
+.login-alert {
+  margin-bottom: 1rem;
+}
+
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.login-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  margin-top: 0.25rem;
+}
+
+.login-remember {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: var(--color-ink-700);
+  font-size: var(--text-sm);
+  font-weight: 500;
+}
+
+.login-remember input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--color-accent-700);
+}
+
+.login-forgot-password {
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--color-accent-700);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.login-forgot-password:hover {
+  text-decoration: underline;
+}
+
+.login-footer {
+  text-align: center;
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--color-line);
+}
+
+.login-register {
+  margin: 0;
+  color: var(--color-ink-500);
+  font-size: var(--text-md);
+}
+
+.login-register button {
+  background: none;
+  border: none;
+  color: var(--color-accent-700);
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+  font-size: inherit;
+}
+
+.login-register button:hover {
+  text-decoration: underline;
+}
+
+.error-message {
+  background: rgba(220, 38, 38, 0.08);
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  color: #b42318;
+  padding: 0.75rem;
+  border-radius: var(--radius-md);
+  font-size: var(--text-md);
+}
+
+@media (max-width: 920px) {
+  .login-container {
+    grid-template-columns: 1fr;
+  }
+
+  .login-showcase-title {
+    max-width: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .login-page {
+    padding: 0.9rem;
+  }
+
+  .login-showcase,
+  .login-card {
+    padding: 1.35rem;
+    border-radius: 1.4rem;
+  }
+}

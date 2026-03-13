@@ -1,0 +1,519 @@
+# ============================================
+# CI/CD Pipeline - Production Ready
+# Law Organizer - Legal CRM SaaS
+# ============================================
+# Required Secrets:
+# - GITHUB_TOKEN (automatic)
+# - SNYK_TOKEN
+# - STAGING_KUBE_CONFIG
+# - PRODUCTION_KUBE_CONFIG
+# - DATABASE_URL
+# - SLACK_WEBHOOK
+# - DOCKER_REGISTRY_USERNAME
+# - DOCKER_REGISTRY_PASSWORD
+# ============================================
+
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main, develop, 'release/*']
+    tags: ['v*']
+  pull_request:
+    branches: [main, develop]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  DOCKER_REGISTRY: ghcr.io
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ========================================
+  # CODE QUALITY
+  # ========================================
+  lint:
+    name: Lint & Format Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Check formatting
+        run: npm run format:check
+        continue-on-error: true
+
+  # ========================================
+  # UNIT TESTS
+  # ========================================
+  test-unit:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run unit tests
+        run: npm run test:cov
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage/lcov.info
+          flags: unittests
+          fail_ci_if_error: false
+
+  # ========================================
+  # INTEGRATION TESTS
+  # ========================================
+  test-integration:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: law_organizer_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run integration tests
+        run: npm run test:e2e
+        env:
+          DATABASE_HOST: localhost
+          DATABASE_PORT: 5432
+          DATABASE_USER: test
+          DATABASE_PASSWORD: test
+          DATABASE_NAME: law_organizer_test
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+          JWT_SECRET: test-secret-key-for-integration-tests-min-32-chars
+          JWT_REFRESH_SECRET: test-refresh-secret-key-for-integration-tests-min-32-chars
+
+  # ========================================
+  # SECURITY SCAN
+  # ========================================
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy results to GitHub Security
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'
+
+  # ========================================
+  # BUILD DOCKER IMAGES
+  # ========================================
+  build:
+    name: Build Docker Images
+    runs-on: ubuntu-latest
+    needs: [test-unit, test-integration, security]
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      backend-tag: ${{ steps.meta-backend.outputs.tags }}
+      frontend-tag: ${{ steps.meta-frontend.outputs.tags }}
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.DOCKER_REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: |
+          if [[ $GITHUB_REF == refs/tags/v* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+          elif [[ $GITHUB_REF == refs/heads/main ]]; then
+            echo "version=latest" >> $GITHUB_OUTPUT
+          else
+            echo "version=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          fi
+
+      # Backend Image
+      - name: Extract metadata for Backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.BACKEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: production
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            NODE_ENV=production
+
+      # Frontend Image
+      - name: Extract metadata for Frontend
+        id: meta-frontend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.FRONTEND_IMAGE }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha,prefix={{branch}}-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Frontend image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile.frontend
+          target: production
+          push: true
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          build-args: |
+            VITE_API_URL=/api
+
+      - name: Scan Backend image for vulnerabilities
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:${{ steps.version.outputs.version }}
+          format: 'sarif'
+          output: 'trivy-image-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+  # ========================================
+  # DEPLOY TO STAGING
+  # ========================================
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    environment:
+      name: staging
+      url: https://staging.laworganizer.ua
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.STAGING_KUBE_CONFIG }}
+
+      - name: Deploy Backend
+        run: |
+          kubectl set image deployment/law-organizer-backend \
+            backend=${{ env.BACKEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Deploy Frontend
+        run: |
+          kubectl set image deployment/law-organizer-frontend \
+            frontend=${{ env.FRONTEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Deploy Worker
+        run: |
+          kubectl set image deployment/law-organizer-worker \
+            worker=${{ env.BACKEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/law-organizer-backend -n law-organizer --timeout=5m
+          kubectl rollout status deployment/law-organizer-frontend -n law-organizer --timeout=5m
+          kubectl rollout status deployment/law-organizer-worker -n law-organizer --timeout=5m
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n law-organizer -l app=law-organizer
+          kubectl get services -n law-organizer
+          kubectl get ingress -n law-organizer
+
+  # ========================================
+  # DEPLOY TO PRODUCTION
+  # ========================================
+  deploy-production:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://laworganizer.ua
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure kubectl
+        uses: azure/k8s-set-context@v4
+        with:
+          method: kubeconfig
+          kubeconfig: ${{ secrets.PRODUCTION_KUBE_CONFIG }}
+
+      - name: Create namespace if not exists
+        run: |
+          kubectl create namespace law-organizer --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply ConfigMaps and Secrets (template only - use Sealed Secrets in practice)
+        run: |
+          kubectl apply -f k8s/00-config.yaml
+
+      - name: Deploy Backend
+        run: |
+          kubectl apply -f k8s/01-backend-deployment.yaml
+
+          kubectl set image deployment/law-organizer-backend \
+            backend=${{ env.BACKEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Deploy Frontend
+        run: |
+          kubectl apply -f k8s/02-frontend-deployment.yaml
+
+          kubectl set image deployment/law-organizer-frontend \
+            frontend=${{ env.FRONTEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Deploy Worker
+        run: |
+          kubectl apply -f k8s/03-worker-deployment.yaml
+
+          kubectl set image deployment/law-organizer-worker \
+            worker=${{ env.BACKEND_IMAGE }}:${{ needs.build.outputs.version }} \
+            -n law-organizer
+
+      - name: Apply Ingress
+        run: |
+          kubectl apply -f k8s/04-ingress.yaml
+
+      - name: Wait for rollout
+        run: |
+          kubectl rollout status deployment/law-organizer-backend -n law-organizer --timeout=10m
+          kubectl rollout status deployment/law-organizer-frontend -n law-organizer --timeout=5m
+          kubectl rollout status deployment/law-organizer-worker -n law-organizer --timeout=5m
+
+      - name: Verify deployment
+        run: |
+          echo "=== Pods ==="
+          kubectl get pods -n law-organizer -l app=law-organizer
+
+          echo "=== Services ==="
+          kubectl get services -n law-organizer
+
+          echo "=== Ingress ==="
+          kubectl get ingress -n law-organizer
+
+          echo "=== HPA Status ==="
+          kubectl get hpa -n law-organizer
+
+      - name: Health Check
+        run: |
+          sleep 30
+          kubectl exec -n law-organizer deployment/law-organizer-backend -- wget -q -O- http://localhost:3000/health
+
+      - name: Rollback on failure
+        if: failure()
+        run: |
+          kubectl rollout undo deployment/law-organizer-backend -n law-organizer
+          kubectl rollout undo deployment/law-organizer-frontend -n law-organizer
+          kubectl rollout undo deployment/law-organizer-worker -n law-organizer
+
+  # ========================================
+  # DATABASE MIGRATION
+  # ========================================
+  migrate:
+    name: Database Migration
+    runs-on: ubuntu-latest
+    needs: [deploy-staging, deploy-production]
+    if: always() && (needs.deploy-staging.result == 'success' || needs.deploy-production.result == 'success')
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install dependencies
+        run: npm ci --frozen-lockfile
+
+      - name: Run migrations
+        run: npm run migration:run
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+
+  # ========================================
+  # NOTIFICATIONS
+  # ========================================
+  notify:
+    name: Notify
+    runs-on: ubuntu-latest
+    needs: [lint, test-unit, test-integration, security, build, deploy-staging, deploy-production]
+    if: always()
+
+    steps:
+      - name: Determine overall status
+        id: status
+        run: |
+          if [[ "${{ needs.deploy-production.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.deploy-staging.result }}" == "success" ]]; then
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "emoji=:white_check_mark:" >> $GITHUB_OUTPUT
+          elif [[ "${{ needs.build.result }}" == "failure" ]]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "emoji=:x:" >> $GITHUB_OUTPUT
+          else
+            echo "status=${{ needs.build.result || 'unknown' }}" >> $GITHUB_OUTPUT
+            echo "emoji=:warning:" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Slack notification
+        if: secrets.SLACK_WEBHOOK != ''
+        uses: 8398a7/action-slack@v3
+        with:
+          status: ${{ steps.status.outputs.status }}
+          webhook_url: ${{ secrets.SLACK_WEBHOOK }}
+          fields: repo,message,commit,author,action,eventName,ref,workflow
+          text: |
+            ${{ steps.status.outputs.emoji }} Pipeline *${{ steps.status.outputs.status }}*
+
+            *Repository:* ${{ github.repository }}
+            *Branch:* ${{ github.ref_name }}
+            *Commit:* ${{ github.sha }}
+            *Author:* ${{ github.actor }}
+
+            *Test Results:*
+            - Lint: ${{ needs.lint.result }}
+            - Unit Tests: ${{ needs.test-unit.result }}
+            - Integration Tests: ${{ needs.test-integration.result }}
+            - Security: ${{ needs.security.result }}
+
+            *Deployment:*
+            - Staging: ${{ needs.deploy-staging.result }}
+            - Production: ${{ needs.deploy-production.result }}

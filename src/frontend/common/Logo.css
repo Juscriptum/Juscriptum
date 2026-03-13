@@ -1,0 +1,25 @@
+.brand-logo {
+    display: flex;
+    align-items: center;
+    gap: 0.7rem;
+    width: fit-content;
+    min-width: 0;
+}
+
+.brand-logo__title {
+    min-width: 0;
+    font-size: var(--logo-font-size);
+    font-weight: 700;
+    color: var(--logo-color);
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+}
+
+.brand-logo__image {
+    width: var(--logo-icon-size);
+    height: var(--logo-icon-size);
+    display: block;
+    flex-shrink: 0;
+    object-fit: contain;
+}

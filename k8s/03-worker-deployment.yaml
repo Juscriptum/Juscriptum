@@ -1,0 +1,206 @@
+# ============================================
+# Redis Worker Deployment
+# ============================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: law-organizer-worker
+  namespace: law-organizer
+  labels:
+    app: law-organizer
+    component: worker
+    version: v1
+spec:
+  replicas: 2
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: law-organizer
+      component: worker
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: law-organizer
+        component: worker
+        version: v1
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+
+      terminationGracePeriodSeconds: 60
+
+      initContainers:
+        - name: wait-for-services
+          image: busybox:1.36
+          command:
+            - sh
+            - -c
+            - |
+              until nc -z postgres-postgresql.database.svc.cluster.local 5432; do echo waiting for db; sleep 2; done
+              until nc -z redis-master.database.svc.cluster.local 6379; do echo waiting for redis; sleep 2; done
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+
+      containers:
+        - name: worker
+          image: ghcr.io/laworganizer/backend:latest
+          imagePullPolicy: Always
+
+          command: ["node", "dist/worker.js"]
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1001
+            capabilities:
+              drop:
+                - ALL
+
+          env:
+            - name: NODE_ENV
+              value: "production"
+            - name: WORKER_MODE
+              value: "true"
+            # Database
+            - name: DATABASE_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: host
+            - name: DATABASE_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: port
+            - name: DATABASE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: user
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: password
+            - name: DATABASE_NAME
+              valueFrom:
+                secretKeyRef:
+                  name: database-secret
+                  key: name
+            # Redis
+            - name: REDIS_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: host
+            - name: REDIS_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: port
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: redis-secret
+                  key: password
+            # AWS
+            - name: AWS_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: aws-access-key-id
+            - name: AWS_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: aws-secrets
+                  key: aws-secret-access-key
+            # Monitoring
+            - name: SENTRY_DSN
+              valueFrom:
+                secretKeyRef:
+                  name: monitoring-secrets
+                  key: sentry-dsn
+
+          envFrom:
+            - configMapRef:
+                name: app-config
+
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: logs
+              mountPath: /app/logs
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        - name: logs
+          emptyDir: {}
+---
+# ============================================
+# Horizontal Pod Autoscaler - Worker
+# ============================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: law-organizer-worker-hpa
+  namespace: law-organizer
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: law-organizer-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: External
+      external:
+        metric:
+          name: redis_queue_length
+          selector:
+            matchLabels:
+              queue: "law-organizer-jobs"
+        target:
+          type: AverageValue
+          averageValue: "100"
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+---
+# ============================================
+# Pod Disruption Budget - Worker
+# ============================================
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: law-organizer-worker-pdb
+  namespace: law-organizer
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: law-organizer
+      component: worker

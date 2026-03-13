@@ -1,0 +1,123 @@
+.upgrade-prompt {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 1.5rem;
+    text-align: center;
+    background: var(--color-surface-elevated);
+    border: 1px dashed rgba(61, 118, 209, 0.18);
+    border-radius: var(--radius-lg);
+}
+
+.upgrade-prompt-icon {
+    color: #9ca3af;
+    margin-bottom: 16px;
+}
+
+.upgrade-prompt-title {
+    margin: 0 0 8px;
+    font-size: var(--text-title);
+    font-weight: 600;
+    color: var(--color-ink-950);
+}
+
+.upgrade-prompt-message {
+    margin: 0 0 8px;
+    font-size: var(--text-md);
+    color: var(--color-ink-700);
+}
+
+.upgrade-prompt-feature {
+    margin: 0 0 16px;
+    font-size: var(--text-sm);
+    color: var(--color-ink-500);
+}
+
+.upgrade-prompt-button,
+.trial-banner-button {
+    min-height: var(--control-height-md);
+    padding: 0.5rem 1rem;
+    font-size: var(--text-sm);
+    font-weight: 500;
+    color: #fff;
+    background: var(--color-accent-700);
+    border: none;
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+.upgrade-prompt-button:hover,
+.trial-banner-button:hover {
+    background: var(--color-accent-600);
+}
+
+.feature-locked-overlay {
+    position: relative;
+}
+
+.feature-locked-overlay__content {
+    filter: blur(4px);
+    pointer-events: none;
+}
+
+.feature-locked-overlay__layer {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.plan-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 4px 12px;
+    font-size: var(--text-caption);
+    font-weight: 500;
+    border-radius: 9999px;
+    text-transform: capitalize;
+    color: #fff;
+}
+
+.plan-badge--basic {
+    background: #6b7280;
+}
+
+.plan-badge--professional {
+    background: #3b82f6;
+}
+
+.plan-badge--enterprise {
+    background: #8b5cf6;
+}
+
+.trial-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid;
+    margin-bottom: 16px;
+}
+
+.trial-banner--expired {
+    background: #fef2f2;
+    border-color: #ef4444;
+}
+
+.trial-banner--warning {
+    background: #fef3c7;
+    border-color: #f59e0b;
+}
+
+.trial-banner__text--expired {
+    color: #dc2626;
+}
+
+.trial-banner__text--warning {
+    color: #d97706;
+}

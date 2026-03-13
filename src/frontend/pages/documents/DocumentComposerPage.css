@@ -1,0 +1,104 @@
+.document-composer-page {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.document-composer-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1.25rem;
+}
+
+.document-composer-form,
+.document-composer-preview {
+  padding: 1.25rem;
+}
+
+.document-composer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.document-composer-grid label,
+.document-composer-textarea {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.document-composer-grid-wide {
+  grid-column: 1 / -1;
+}
+
+.document-composer-grid span,
+.document-composer-textarea span {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-text-secondary, #516072);
+}
+
+.document-composer-grid input,
+.document-composer-grid select,
+.document-composer-textarea textarea {
+  width: 100%;
+  border: 1px solid var(--color-border, #d5dde7);
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.95rem;
+  background: #fff;
+}
+
+.document-composer-textarea {
+  margin-top: 1rem;
+}
+
+.document-composer-textarea textarea {
+  resize: vertical;
+  min-height: 20rem;
+  font: inherit;
+  line-height: 1.55;
+}
+
+.document-composer-preview {
+  display: grid;
+  gap: 1rem;
+}
+
+.document-composer-preview-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.document-composer-preview-head h3 {
+  margin: 0;
+}
+
+.document-composer-preview-head span {
+  color: var(--color-text-secondary, #516072);
+  font-size: 0.92rem;
+}
+
+.document-composer-frame {
+  width: 100%;
+  min-height: 82vh;
+  border: 1px solid var(--color-border, #d5dde7);
+  border-radius: 1rem;
+  background: #fff;
+}
+
+@media (min-width: 1200px) {
+  .document-composer-form {
+    max-width: 78rem;
+  }
+}
+
+@media (max-width: 960px) {
+  .document-composer-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .document-composer-grid {
+    grid-template-columns: 1fr;
+  }
+}

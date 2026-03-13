@@ -1,0 +1,142 @@
+.mobile-scan-page {
+  min-height: 100vh;
+  padding: 1.25rem;
+  background:
+    radial-gradient(circle at top right, rgba(164, 196, 255, 0.28), transparent 28%),
+    linear-gradient(180deg, #f4f8fc 0%, #eef3f8 100%);
+  color: #162033;
+  display: grid;
+  gap: 1rem;
+}
+
+.mobile-scan-page-loading {
+  place-items: center;
+}
+
+.mobile-scan-header,
+.mobile-scan-panel,
+.mobile-scan-pages,
+.mobile-scan-footer {
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(177, 191, 207, 0.45);
+  border-radius: 1.25rem;
+  padding: 1rem;
+}
+
+.mobile-scan-kicker {
+  margin: 0 0 0.35rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 0.72rem;
+  color: #54718f;
+}
+
+.mobile-scan-header h1 {
+  margin: 0 0 0.3rem;
+  font-size: 1.4rem;
+}
+
+.mobile-scan-panel {
+  display: grid;
+  gap: 1rem;
+}
+
+.mobile-scan-field,
+.mobile-scan-upload {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.mobile-scan-upload-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.mobile-scan-field select {
+  border: 1px solid #d5dde7;
+  border-radius: 0.9rem;
+  padding: 0.8rem 0.95rem;
+}
+
+.mobile-scan-upload input {
+  width: 100%;
+}
+
+.mobile-scan-upload {
+  padding: 0.9rem;
+  border: 1px dashed #c7d5e5;
+  border-radius: 1rem;
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 100%);
+}
+
+.mobile-scan-upload span {
+  font-weight: 600;
+}
+
+.mobile-scan-hint {
+  margin: 0;
+  color: #5b6f86;
+  font-size: 0.92rem;
+  line-height: 1.45;
+}
+
+.mobile-scan-pages {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.mobile-scan-card {
+  display: grid;
+  gap: 0.6rem;
+}
+
+.mobile-scan-card img,
+.mobile-scan-card-placeholder {
+  width: 100%;
+  min-height: 10rem;
+  border-radius: 1rem;
+  border: 1px solid #d5dde7;
+  background: #fff;
+}
+
+.mobile-scan-card img {
+  display: block;
+  object-fit: cover;
+}
+
+.mobile-scan-card-placeholder {
+  display: grid;
+  place-items: center;
+  color: #516072;
+}
+
+.mobile-scan-card-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.mobile-scan-card-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.mobile-scan-card-actions button {
+  border: 1px solid #d5dde7;
+  border-radius: 0.85rem;
+  padding: 0.7rem;
+  background: #fff;
+}
+
+.mobile-scan-empty,
+.mobile-scan-finished {
+  color: #516072;
+}
+
+@media (max-width: 640px) {
+  .mobile-scan-upload-grid {
+    grid-template-columns: 1fr;
+  }
+}

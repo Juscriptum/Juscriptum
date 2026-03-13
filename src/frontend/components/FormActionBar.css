@@ -1,0 +1,53 @@
+.form-action-bar {
+    position: sticky;
+    bottom: 1rem;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-top: var(--space-5);
+    padding: 0.7rem 0.9rem;
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    border-radius: var(--radius-lg);
+    background: rgba(245, 249, 253, 0.94);
+    backdrop-filter: blur(18px);
+    box-shadow: var(--shadow-medium);
+    overflow-x: auto;
+}
+
+.form-action-bar__meta {
+    display: inline-flex;
+    align-items: center;
+    min-width: 0;
+    flex: 0 0 auto;
+}
+
+.form-action-bar__meta strong {
+    color: var(--color-ink-900);
+    font-family: var(--font-sans);
+    font-size: var(--text-lg);
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.form-action-bar__meta span {
+    font-size: var(--text-sm);
+    color: var(--color-ink-500);
+}
+
+.form-action-bar__actions {
+    display: flex;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    gap: var(--space-2);
+    flex: 1 0 auto;
+    min-width: max-content;
+}
+
+@media (max-width: 768px) {
+    .form-action-bar {
+        bottom: 5.5rem;
+        padding: 0.65rem 0.75rem;
+    }
+}

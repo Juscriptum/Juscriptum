@@ -1,0 +1,110 @@
+.related-notes-panel {
+  margin-top: 1.5rem;
+  padding: 1.5rem;
+  border-radius: 1.5rem;
+  background:
+    linear-gradient(145deg, rgba(255, 252, 245, 0.98), rgba(245, 240, 227, 0.95));
+  border: 1px solid rgba(112, 87, 54, 0.12);
+  box-shadow: 0 20px 45px rgba(92, 66, 34, 0.08);
+}
+
+.related-notes-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.related-notes-head h3 {
+  margin: 0 0 0.35rem;
+}
+
+.related-notes-head p {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.related-notes-actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.related-notes-loading,
+.related-notes-empty {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.related-notes-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.related-notes-list {
+  margin-top: 1rem;
+  display: grid;
+  gap: 0.85rem;
+}
+
+.related-note-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(112, 87, 54, 0.12);
+  text-decoration: none;
+  color: inherit;
+  transition:
+    transform 0.18s ease,
+    box-shadow 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.related-note-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(152, 111, 58, 0.26);
+  box-shadow: 0 12px 24px rgba(92, 66, 34, 0.12);
+}
+
+.related-note-card-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.related-note-card-head strong {
+  font-size: 1rem;
+}
+
+.related-note-card-head span {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8f6b3b;
+}
+
+.related-note-card p {
+  margin: 0;
+  color: var(--color-text-secondary, #6b7280);
+}
+
+.related-note-card-meta {
+  display: flex;
+  gap: 0.8rem;
+  flex-wrap: wrap;
+  font-size: 0.86rem;
+  color: #8a7b61;
+}
+
+@media (max-width: 820px) {
+  .related-notes-head {
+    flex-direction: column;
+  }
+}

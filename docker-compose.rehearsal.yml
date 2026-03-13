@@ -1,0 +1,113 @@
+services:
+  backend:
+    ports:
+      - "3000:3000"
+    deploy:
+      replicas: 1
+
+  frontend:
+    ports:
+      - "8080:8080"
+    deploy:
+      replicas: 1
+
+  postgres-restore:
+    image: postgres:16-alpine
+    container_name: law-organizer-postgres-restore
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?Database password required}
+      POSTGRES_DB: ${RESTORE_DB_NAME:-law_organizer_restore}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_restore_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${RESTORE_DB_NAME:-law_organizer_restore}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - app-network
+
+  backend-restore:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: ${DOCKER_REGISTRY:-}laworganizer/backend:${IMAGE_TAG:-latest}
+    container_name: law-organizer-backend-restore
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DB_TYPE: postgres
+      DB_HOST: postgres-restore
+      DB_PORT: 5432
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_NAME: ${RESTORE_DB_NAME:-law_organizer_restore}
+      DATABASE_HOST: postgres-restore
+      DATABASE_PORT: 5432
+      DATABASE_USER: ${DB_USER:-postgres}
+      DATABASE_PASSWORD: ${DB_PASSWORD}
+      DATABASE_NAME: ${RESTORE_DB_NAME:-law_organizer_restore}
+      REDIS_ENABLED: ${REDIS_ENABLED:-true}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      REDIS_PREFIX: "law-org:"
+      JWT_SECRET: ${JWT_SECRET:?JWT secret required}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?JWT refresh secret required}
+      JWT_ACCESS_TOKEN_EXPIRY: ${JWT_ACCESS_TOKEN_EXPIRY:-15m}
+      JWT_REFRESH_TOKEN_EXPIRY: ${JWT_REFRESH_TOKEN_EXPIRY:-7d}
+      APP_URL: ${APP_URL}
+      BASE_DOMAIN: ${BASE_DOMAIN:-law-organizer.ua}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      RUN_SCHEDULED_JOBS: "false"
+      STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
+      AWS_S3_BUCKET: ${AWS_S3_BUCKET:-law-organizer-uploads}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-minioadmin}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      AWS_REGION: ${AWS_REGION:-us-east-1}
+      AWS_ENDPOINT: ${AWS_ENDPOINT:-http://minio:9000}
+      MALWARE_SCANNER_MODE: ${MALWARE_SCANNER_MODE:-stub}
+      MALWARE_SCANNER_COMMAND: ${MALWARE_SCANNER_COMMAND:-clamdscan}
+      MALWARE_SCANNER_TIMEOUT_MS: ${MALWARE_SCANNER_TIMEOUT_MS:-15000}
+      ENCRYPT_PII: ${ENCRYPT_PII:-false}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET}
+      WAYFORPAY_MERCHANT_ACCOUNT: ${WAYFORPAY_MERCHANT_ACCOUNT}
+      WAYFORPAY_MERCHANT_SECRET_KEY: ${WAYFORPAY_MERCHANT_SECRET_KEY}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      LOG_FORMAT: json
+    depends_on:
+      postgres-restore:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    volumes:
+      - uploads_data:/app/uploads
+      - logs_data:/app/logs
+    networks:
+      - app-network
+
+volumes:
+  postgres_restore_data:
+    driver: local
