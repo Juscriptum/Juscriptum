@@ -1,5 +1,9 @@
 # Deployment Guide - Law Organizer
 
+> Read this after `AGENTS.md`, `RUN.md`, and `docs/DAY_ONE_SCOPE_AND_STAGING_PREP.md`.
+> For the current reduced day-one scope and the staging baseline env set, start with `.env.staging.example`.
+> This document is a broader infrastructure reference and does not by itself prove provider callbacks, malware-scanner runtime, or full launch readiness.
+
 ## Production Deployment Checklist
 
 ### Prerequisites

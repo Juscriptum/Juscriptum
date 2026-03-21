@@ -1,110 +1,265 @@
-# Law Organizer — How to Run
+# Law Organizer Runbook
 
-## Stack
+This runbook favors operational clarity over “one command” optimism.
 
-- **Backend:** NestJS 10, TypeORM, Node 20
-- **Frontend:** React 18, Vite 5, Redux Toolkit
-- **DB:** SQLite (local) / PostgreSQL (Docker)
-- **Cache:** Redis (optional; disabled in development by default)
-- **Package manager:** npm
+## Before You Start
 
----
+- Node.js 20 and npm are the expected local runtime
+- Docker is optional but required for the containerized modes
+- The app loads `.env.local` first and then `.env`
+- Direct backend routes use `/v1`
+- `GET /health` and `GET /readiness` stay outside `/v1`
+- Frontend dev uses `/api` only as a proxy to backend `/v1`
 
-## 1. Run locally (dev)
+## Mode 1: Fast Local Mode
 
-### Prerequisites
+Use this when you need the fastest edit/run loop.
 
-- Node.js 20 LTS (recommended; other versions may need `npm rebuild better-sqlite3`)
-- npm
+### What It Uses
 
-### Steps
+- backend on Nest watch mode
+- frontend on Vite
+- local SQLite by default
+- scheduled jobs stay off in the default API dev scripts to keep local resource usage down
+
+### Commands
 
 ```bash
-# Install dependencies
 npm install
-
-# Rebuild native module if you use a different Node version than the one used for npm install
-npm rebuild better-sqlite3
-
-# Copy env (optional; already has defaults for local)
-cp .env.example .env
-
-# Backend: SQLite, no Redis
-NODE_ENV=development DB_TYPE=sqlite npm run start
-
-# In another terminal — frontend
-npm run start:frontend
+npm run start:all
 ```
 
-- **Backend:** http://localhost:3000  
-  - Health: http://localhost:3000/health  
-  - API: http://localhost:3000/v1/...
-- **Frontend:** http://localhost:5173 (Vite proxy to backend)
-
-If you see `SqliteError: near ")": syntax error` on first run, use PostgreSQL (e.g. via Docker) or set `DB_SYNC=false` in `.env` and manage schema yourself.
-
----
-
-## 2. Run with Docker
-
-### Full stack (Postgres, Redis, MinIO, backend, frontend)
+Equivalent split-terminal flow:
 
 ```bash
-cp .env.example .env
-# Edit .env if needed (DB, Redis, Stripe, etc.)
-
-docker-compose up --build -d
-
-# Optional: run only backend + postgres
-docker-compose up -d postgres backend
+npm run start:dev
+npm run start:frontend:wait-backend
 ```
 
-- **Frontend:** http://localhost:80  
-- **Backend API:** http://localhost:3000 (or via frontend at /api/…)  
-- **Health:** http://localhost:3000/health  
-- **PgAdmin:** http://localhost:5050  
-- **MinIO Console:** http://localhost:9001  
-
-### Restart
+Run the dedicated local worker only when you need background jobs:
 
 ```bash
-docker-compose restart backend
-# or
-docker-compose down && docker-compose up -d
+npm run start:worker:dev
 ```
 
----
+### Expected URLs
 
-## 3. Ports
+- Frontend: `http://localhost:5173`
+- Backend health: `http://localhost:3000/health`
+- Backend readiness: `http://localhost:3000/readiness`
+- Direct backend API: `http://localhost:3000/v1/...`
 
-| Service   | Port |
-|----------|------|
-| Frontend | 80 (Docker), 5173 (Vite dev) |
-| Backend  | 3000 |
-| Postgres | 5432 |
-| Redis    | 6379 |
-| MinIO    | 9000 (API), 9001 (Console) |
-| PgAdmin  | 5050 |
-
----
-
-## 4. Health check
+### Validation Checklist
 
 ```bash
 curl http://localhost:3000/health
-# => {"status":"ok","timestamp":"..."}
+curl http://localhost:3000/readiness
 ```
 
----
+Confirm:
 
-## 5. Fixes applied in this repo
+- health returns `200`
+- frontend loads on port `5173`
+- API requests from the frontend proxy reach backend `/v1`
 
-- Entity relations: `Document` ↔ `Case`, `Case` ↔ `Event` (imports / type-only imports).
-- Auth: removed duplicate `ThrottlerModule` from `AuthModule` (global config in `AppModule`).
-- Health: added `GET /health` and excluded it from global prefix `v1`.
-- API prefix: `v1`; frontend uses `VITE_API_URL=/api` in Docker (nginx proxies `/api` → backend `v1`).
-- Redis: optional in dev (`REDIS_ENABLED` defaults to `false` when `NODE_ENV=development`).
-- Winston: sync console-only config in `LoggingModule` to avoid startup hang.
-- Docker: frontend build from repo root; worker service removed (no `dist/worker.js`); backend uses `DB_TYPE=postgres` and `DATABASE_*` in compose.
-- TypeORM: entity path uses `*.entity.js` in build; Postgres env vars `DATABASE_HOST` etc. supported.
-- Enterprise: `TenantDatabaseService` supports SQLite for shared datasource when `DB_TYPE=sqlite`.
+### Caveats
+
+- This mode does not prove PostgreSQL-only behavior such as migrated RLS paths.
+- This mode does not prove split web/worker behavior.
+- SQLite uses `synchronize: true`, which is a local convenience, not the production-like path.
+- `npm run start:dev` and `npm run start:all` set `RUN_SCHEDULED_JOBS=false`; use `npm run start:worker:dev` when you need scheduled/background processing locally.
+
+## Mode 2: Full Local Container Stack
+
+Use this when you want local Postgres, Redis, MinIO, backend, frontend, and the dedicated worker.
+
+### What It Uses
+
+- `docker-compose.yml`
+- `docker-compose.rehearsal.yml`
+- backend with `RUN_SCHEDULED_JOBS=false`
+- worker with `RUN_SCHEDULED_JOBS=true`
+
+### Safe Startup Sequence
+
+Build and start the stateful dependencies first:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.rehearsal.yml up -d --build postgres redis minio
+```
+
+Apply migrations from the backend image:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.rehearsal.yml run --rm backend npm run migration:run
+```
+
+Start the application services:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.rehearsal.yml up -d backend frontend redis-worker
+```
+
+### Expected URLs
+
+- Frontend: `http://localhost:8080`
+- Backend health: `http://localhost:3000/health`
+- Backend readiness: `http://localhost:3000/readiness`
+- Direct backend API: `http://localhost:3000/v1/...`
+
+### Validation Checklist
+
+```bash
+curl http://localhost:3000/health
+curl http://localhost:3000/readiness
+```
+
+Confirm:
+
+- health returns `200`
+- readiness returns `200`
+- frontend loads on port `8080`
+- background jobs are handled by `redis-worker`, not by the web container
+
+### Important Caveats
+
+- The worker service name is historical. It is not a BullMQ/Redis queue worker.
+- The current worker is a dedicated Nest context that polls DB-backed jobs on a schedule.
+- The checked-in `nginx-proxy` service is not repo-complete because these paths are missing:
+  - `nginx.prod.conf`
+  - `ssl/`
+- Because of that, do not use `nginx-proxy` as the default local entrypoint from this repo.
+
+## Mode 3: Near-Production Rehearsal
+
+Use this when you want a repeatable local rehearsal of health, degraded readiness, and restore flow.
+
+### Command
+
+```bash
+./scripts/local-launch-rehearsal.sh
+```
+
+### What It Does
+
+- starts the containerized local stack
+- captures healthy `/health` and `/readiness`
+- simulates Redis degradation and captures degraded readiness
+- restores readiness
+- creates a Postgres backup and restore flow
+- writes artifacts to `tmp/launch-rehearsal`
+
+### Required Environment
+
+The script expects real values for at least:
+
+- `DB_PASSWORD`
+- `REDIS_PASSWORD`
+- `JWT_SECRET`
+- `JWT_REFRESH_SECRET`
+- `APP_URL`
+- `SMTP_HOST`
+- `SMTP_PORT`
+- `SMTP_USER`
+- `SMTP_PASSWORD`
+- `AWS_SECRET_ACCESS_KEY`
+
+### Validation Checklist
+
+After the script completes, review:
+
+- `tmp/launch-rehearsal/health.json`
+- `tmp/launch-rehearsal/readiness-healthy.json`
+- `tmp/launch-rehearsal/readiness-degraded.json`
+- `tmp/launch-rehearsal/readiness-restored.json`
+- `tmp/launch-rehearsal/backup.sql`
+
+## Staging Prep Pack
+
+Use this when the goal is to move from local verification to a controlled staging rollout with a reduced day-one scope.
+
+Starting artifacts:
+
+- `docs/DAY_ONE_SCOPE_AND_STAGING_PREP.md`
+- `.env.staging.example`
+
+Recommended assumptions for this pack:
+
+- trust providers stay in `stub` mode
+- Stripe and WayForPay stay out of scope unless explicitly re-added
+- SMS and push stay out of scope
+- staging proves:
+  - PostgreSQL migrations
+  - Redis-backed throttling
+  - dedicated worker split
+  - object storage
+  - real ClamAV command execution
+  - real PDF/OCR runtime
+  - SMTP-backed email for essential flows
+
+Important boundary:
+
+- this pack prepares staging and a reduced first-launch scope
+- it does not by itself prove full public-launch readiness
+
+## Build, Test, And Verification Commands
+
+```bash
+npm run build
+npm run build:frontend
+npm run lint
+npm test -- --runInBand
+npm run test:e2e -- --runInBand
+npm run test:frontend:smoke
+```
+
+Use targeted helpers when relevant:
+
+```bash
+npm run build:registry-index
+npm run update:external-data -- --dry-run
+```
+
+Shared registry import notes:
+
+- `storage/registry-index.db` is a shared cross-user registry cache; it is not tenant-scoped
+- `npm run build:registry-index -- --source=court_stan|court_dates|asvp --force` now pre-splits oversized source CSVs into temporary year-based chunks before importing them into the shared SQLite index
+- by default, successfully imported `court_stan`, `court_dates`, and `asvp` source CSVs are deleted after the shared SQLite commit; drop a fresh full snapshot into the corresponding source directory before the next import cycle if you want to refresh the shared index
+- when a source directory is empty after a consumed import, the last successful shared SQLite index is kept instead of being cleared
+- tune chunking / cleanup with:
+  - `COURT_STAN_PRE_SPLIT_MIN_BYTES`
+  - `COURT_STAN_SPLIT_ROWS_PER_FILE`
+  - `COURT_STAN_DELETE_IMPORTED_FILES=false`
+  - `COURT_DATES_PRE_SPLIT_MIN_BYTES`
+  - `COURT_DATES_SPLIT_ROWS_PER_FILE`
+  - `COURT_DATES_DELETE_IMPORTED_FILES=false`
+  - `ASVP_PRE_SPLIT_MIN_BYTES`
+  - `ASVP_SPLIT_ROWS_PER_FILE`
+  - `ASVP_DELETE_IMPORTED_FILES=false`
+- auto-start triggers for shared registry imports:
+  - on first startup when local source files are present and external-data URLs are not configured
+  - on first startup through external-data bootstrap when external URLs are configured
+  - daily at `10:00` fixed `+01:00`
+  - on new or changed CSV detection in `court_stan/`, `court_dates/`, or `asvp/` via the source monitor
+- tune the source monitor with:
+  - `REGISTRY_SOURCE_MONITOR_INTERVAL_MS`
+
+## Worker Behavior Summary
+
+- Fast local mode:
+  - API keeps scheduled jobs off by default in `npm run start:dev` and `npm run start:all`
+  - run `npm run start:worker:dev` when you need local scheduled/background execution
+- Split/containerized modes:
+  - web/API must use `RUN_SCHEDULED_JOBS=false`
+  - worker must use `RUN_SCHEDULED_JOBS=true`
+- Current worker model:
+  - dedicated Nest application context
+  - `@nestjs/schedule`
+  - DB-backed polling tables
+  - not BullMQ
+
+## Truth Boundaries
+
+- Local green status is not enough to call the repo production-ready.
+- PostgreSQL-only behavior must be validated on PostgreSQL.
+- Real provider, scanner, OCR/runtime, and staging drills are still separate evidence tracks.

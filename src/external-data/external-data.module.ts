@@ -4,6 +4,7 @@ import {
   EXTERNAL_DATA_SOURCE_DEFINITIONS,
   buildDefaultExternalDataDefinitions,
 } from "./external-data.constants";
+import { ExternalDataBootstrapService } from "./services/external-data.bootstrap.service";
 import { ExternalDataSchedulerService } from "./services/external-data.scheduler.service";
 import { ExternalDataService } from "./services/external-data.service";
 
@@ -15,6 +16,7 @@ import { ExternalDataService } from "./services/external-data.service";
       useFactory: () => buildDefaultExternalDataDefinitions(),
     },
     ExternalDataService,
+    ExternalDataBootstrapService,
     ExternalDataSchedulerService,
   ],
   exports: [ExternalDataService],

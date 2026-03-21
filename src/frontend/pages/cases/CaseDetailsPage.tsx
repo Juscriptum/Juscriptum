@@ -17,7 +17,12 @@ import {
   createCaseSchema,
   CreateCaseFormData,
 } from "../../schemas/case.schema";
-import { Case, CaseStatus, TimelineEvent } from "../../types/case.types";
+import {
+  Case,
+  CaseStatus,
+  RegistryHearingSuggestion,
+  TimelineEvent,
+} from "../../types/case.types";
 import { Client } from "../../types/client.types";
 import {
   CaseParticipant,
@@ -111,6 +116,14 @@ export const CaseDetailsPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [statusUpdating, setStatusUpdating] = useState<CaseStatus | null>(null);
   const [isEditing, setIsEditing] = useState(false);
+  const [registrySuggestion, setRegistrySuggestion] =
+    useState<RegistryHearingSuggestion | null>(null);
+  const [registrySuggestionLoading, setRegistrySuggestionLoading] =
+    useState(false);
+  const [registrySuggestionError, setRegistrySuggestionError] = useState<
+    string | null
+  >(null);
+  const [registryEventCreating, setRegistryEventCreating] = useState(false);
 
   const methods = useForm<CreateCaseFormData>({
     resolver: zodResolver(createCaseSchema),
@@ -181,6 +194,43 @@ export const CaseDetailsPage: React.FC = () => {
       methods.setValue("assignedLawyerId", user.id, { shouldDirty: false });
     }
   }, [methods, user?.id]);
+
+  const loadRegistrySuggestion = async (showEmptyState = false) => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setRegistrySuggestionLoading(true);
+      setRegistrySuggestionError(null);
+      const suggestion = await caseService.getRegistryHearingSuggestion(id);
+      setRegistrySuggestion(
+        suggestion && !suggestion.eventAlreadyExists ? suggestion : null,
+      );
+
+      if (!suggestion && showEmptyState) {
+        setRegistrySuggestionError(
+          "Найближче засідання у `court_dates` для цієї справи не знайдено.",
+        );
+      }
+    } catch (err: any) {
+      setRegistrySuggestion(null);
+      setRegistrySuggestionError(
+        err.response?.data?.message ||
+          "Не вдалося перевірити найближче засідання у реєстрі.",
+      );
+    } finally {
+      setRegistrySuggestionLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!caseItem || isEditing) {
+      return;
+    }
+
+    void loadRegistrySuggestion();
+  }, [caseItem?.id, isEditing]);
 
   const getClientDisplayName = (client: Client): string => {
     const personalName =
@@ -253,6 +303,27 @@ export const CaseDetailsPage: React.FC = () => {
     () => (caseItem ? extractParticipantsFromCase(caseItem) : []),
     [caseItem],
   );
+
+  const handleCreateRegistryEvent = async () => {
+    if (!id) {
+      return;
+    }
+
+    try {
+      setRegistryEventCreating(true);
+      setRegistrySuggestionError(null);
+      await caseService.createRegistryHearingEvent(id);
+      setRegistrySuggestion(null);
+      await loadPageData();
+    } catch (err: any) {
+      setRegistrySuggestionError(
+        err.response?.data?.message ||
+          "Не вдалося створити подію за даними `court_dates`.",
+      );
+    } finally {
+      setRegistryEventCreating(false);
+    }
+  };
 
   const handleStartEditing = () => {
     if (!caseItem) {
@@ -345,6 +416,74 @@ export const CaseDetailsPage: React.FC = () => {
 
       {error && (
         <Alert type="error" message={error} onClose={() => setError(null)} />
+      )}
+
+      {!isEditing && registrySuggestion && (
+        <Alert
+          type="info"
+          onClose={() => {
+            setRegistrySuggestion(null);
+            setRegistrySuggestionError(null);
+          }}
+        >
+          <div className="registry-hearing-notice">
+            <strong>
+              У реєстрі знайдено запис про найближче засідання у справі.
+            </strong>
+            <span>
+              Дата: {registrySuggestion.date}. Суд:{" "}
+              {registrySuggestion.courtName || "не вказано"}.
+            </span>
+            <span>
+              Пошук виконано{" "}
+              {registrySuggestion.matchedBy.includes("case_number")
+                ? "за номером справи"
+                : "за ПІБ / учасниками"}
+              . Можемо одразу створити подію за цими даними.
+            </span>
+            <div className="registry-hearing-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={registryEventCreating}
+                onClick={handleCreateRegistryEvent}
+              >
+                {registryEventCreating ? "Створення..." : "Створити подію"}
+              </button>
+              <button
+                type="button"
+                className="btn btn-outline"
+                disabled={registrySuggestionLoading}
+                onClick={() => void loadRegistrySuggestion(true)}
+              >
+                {registrySuggestionLoading ? "Перевірка..." : "Оновити пошук"}
+              </button>
+            </div>
+          </div>
+        </Alert>
+      )}
+
+      {!isEditing && !registrySuggestion && (
+        <div className="case-toolbar">
+          <button
+            type="button"
+            className="btn btn-outline"
+            disabled={registrySuggestionLoading}
+            onClick={() => void loadRegistrySuggestion(true)}
+          >
+            {registrySuggestionLoading
+              ? "Пошук у реєстрі..."
+              : "Знайти найближче засідання в реєстрі"}
+          </button>
+        </div>
+      )}
+
+      {!isEditing && registrySuggestionError && (
+        <Alert
+          type="warning"
+          onClose={() => setRegistrySuggestionError(null)}
+          message={registrySuggestionError}
+        />
       )}
 
       <div className="case-details-summary-grid">

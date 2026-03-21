@@ -36,38 +36,39 @@ const parseUrls = (
     }));
 };
 
-export const buildDefaultExternalDataDefinitions = (): ExternalDataSourceDefinition[] => [
-  {
-    code: "court_stan",
-    datasetUrl: process.env.EXTERNAL_DATASET_URL_COURT_STAN,
-    targetDirectory: path.resolve(process.cwd(), "court_stan"),
-    indexedSource: "court_stan",
-    resources: parseUrls(
-      process.env.EXTERNAL_DATA_URLS_COURT_STAN,
-      "court-stan",
-    ),
-  },
-  {
-    code: "court_dates",
-    datasetUrl: process.env.EXTERNAL_DATASET_URL_COURT_DATES,
-    targetDirectory: path.resolve(process.cwd(), "court_dates"),
-    indexedSource: "court_dates",
-    resources: parseUrls(
-      process.env.EXTERNAL_DATA_URLS_COURT_DATES,
-      "court-dates",
-    ),
-  },
-  {
-    code: "reestr",
-    datasetUrl: process.env.EXTERNAL_DATASET_URL_REESTR,
-    targetDirectory: path.resolve(process.cwd(), "reestr"),
-    resources: parseUrls(process.env.EXTERNAL_DATA_URLS_REESTR, "reestr"),
-  },
-  {
-    code: "asvp",
-    datasetUrl: process.env.EXTERNAL_DATASET_URL_ASVP,
-    targetDirectory: path.resolve(process.cwd(), "asvp"),
-    indexedSource: "asvp",
-    resources: parseUrls(process.env.EXTERNAL_DATA_URLS_ASVP, "asvp"),
-  },
-];
+export const buildDefaultExternalDataDefinitions =
+  (): ExternalDataSourceDefinition[] => [
+    {
+      code: "court_stan",
+      datasetUrl: process.env.EXTERNAL_DATASET_URL_COURT_STAN,
+      targetDirectory: path.resolve(process.cwd(), "court_stan"),
+      indexedSource: "court_stan",
+      resources: parseUrls(
+        process.env.EXTERNAL_DATA_URLS_COURT_STAN,
+        "court-stan",
+      ),
+    },
+    {
+      code: "court_dates",
+      datasetUrl: process.env.EXTERNAL_DATASET_URL_COURT_DATES,
+      targetDirectory: path.resolve(process.cwd(), "court_dates"),
+      indexedSource: "court_dates",
+      resources: parseUrls(
+        process.env.EXTERNAL_DATA_URLS_COURT_DATES,
+        "court-dates",
+      ),
+    },
+    {
+      code: "reestr",
+      datasetUrl: process.env.EXTERNAL_DATASET_URL_REESTR,
+      targetDirectory: path.resolve(process.cwd(), "reestr"),
+      resources: parseUrls(process.env.EXTERNAL_DATA_URLS_REESTR, "reestr"),
+    },
+    {
+      code: "asvp",
+      datasetUrl: process.env.EXTERNAL_DATASET_URL_ASVP,
+      targetDirectory: path.resolve(process.cwd(), "asvp"),
+      indexedSource: "asvp",
+      resources: parseUrls(process.env.EXTERNAL_DATA_URLS_ASVP, "asvp"),
+    },
+  ];

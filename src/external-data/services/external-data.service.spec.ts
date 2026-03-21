@@ -65,7 +65,9 @@ describe("ExternalDataService", () => {
     await service.updateExternalData({ source: "court_stan" });
 
     expect(
-      (await readFile(path.join(targetDirectory, "court.csv"))).toString("utf-8"),
+      (await readFile(path.join(targetDirectory, "court.csv"))).toString(
+        "utf-8",
+      ),
     ).toContain(`"Суд"`);
     expect(registryIndexService.rebuildIndexes).toHaveBeenCalledWith({
       source: "court_stan",
@@ -123,8 +125,14 @@ async function startStaticServer(
       "content-type",
       request.url?.endsWith(".zip") ? "application/zip" : "text/csv",
     );
-    response.setHeader("etag", `"${Buffer.from(request.url || "").toString("hex")}"`);
-    response.setHeader("last-modified", new Date("2026-03-13T10:00:00Z").toUTCString());
+    response.setHeader(
+      "etag",
+      `"${Buffer.from(request.url || "").toString("hex")}"`,
+    );
+    response.setHeader(
+      "last-modified",
+      new Date("2026-03-13T10:00:00Z").toUTCString(),
+    );
 
     if (request.method === "HEAD") {
       response.statusCode = 200;

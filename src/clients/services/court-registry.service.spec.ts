@@ -69,6 +69,29 @@ describe("CourtRegistryService", () => {
     ]);
   });
 
+  it("should find participant by partial full name tokens", async () => {
+    await writeFile(
+      path.join(courtDirectory, "registry.csv"),
+      [
+        '"court_name"\t"case_number"\t"case_proc"\t"registration_date"\t"judge"\t"judges"\t"participants"\t"stage_date"\t"stage_name"\t"cause_result"\t"cause_dep"\t"type"\t"description"',
+        '"Тернопільський окружний адміністративний суд"\t"500/210/26"\t"П/500/243/26"\t"19.01.2026"\t"суддя-доповідач: Чепенюк Ольга Володимирівна"\t""\t"Позивач (Заявник): Пиріжок Ярослав Іванович, Відповідач (Боржник): Головне управління Пенсійного фонду України в Тернопільській області"\t"19.01.2026"\t"Призначено склад суду"\t""\t""\t"Адміністративний позов"\t"визнання бездіяльності протиправною"',
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const results = await service.searchInCourtRegistry({
+      query: "Пиріжок Ярослав",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toEqual(
+      expect.objectContaining({
+        person: "Пиріжок Ярослав Іванович",
+        caseNumber: "500/210/26",
+      }),
+    );
+  });
+
   it("should decode and search ASVP rows encoded in cp1251", async () => {
     const csv = [
       "DEBTOR_NAME,DEBTOR_BIRTHDATE,DEBTOR_CODE,CREDITOR_NAME,CREDITOR_CODE,VP_ORDERNUM,VP_BEGINDATE,VP_STATE,ORG_NAME,DVS_CODE,PHONE_NUM,EMAIL_ADDR,BANK_ACCOUNT",
@@ -152,6 +175,34 @@ describe("CourtRegistryService", () => {
     });
   });
 
+  it("should search court dates by participant name", async () => {
+    await writeFile(
+      path.join(courtDatesDirectory, "dates.csv"),
+      [
+        '"date"\t"judges"\t"case"\t"court_name"\t"court_room"\t"case_involved"\t"case_description"',
+        '"25.03.2026 11:30"\t"Суддя"\t"760/123/26"\t"Шевченківський районний суд міста Києва"\t"12"\t"Іваненко Іван Іванович"\t"стягнення заборгованості"',
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const results = await service.searchCourtDates({
+      query: "Іваненко Іван Іванович",
+      onlyUpcoming: true,
+    });
+
+    expect(results).toEqual([
+      {
+        date: "25.03.2026 11:30",
+        judges: "Суддя",
+        caseNumber: "760/123/26",
+        courtName: "Шевченківський районний суд міста Києва",
+        courtRoom: "12",
+        caseInvolved: "Іваненко Іван Іванович",
+        caseDescription: "стягнення заборгованості",
+      },
+    ]);
+  });
+
   it("should reject empty queries", async () => {
     await expect(
       service.searchInCourtRegistry({ query: "   " }),
@@ -164,5 +215,52 @@ describe("CourtRegistryService", () => {
     await expect(
       service.searchInCourtRegistry({ query: "Іван" }),
     ).rejects.toThrow(NotFoundException);
+  });
+
+  it("should resolve court dates from the internal registry index without court_dates CSV files", async () => {
+    const indexedService = new CourtRegistryService(
+      [courtDirectory],
+      [asvpDirectory],
+      [path.join(tempDirectory, "missing-court-dates")],
+      {
+        isIndexAvailableFor: jest
+          .fn()
+          .mockImplementation(
+            async (source: string) =>
+              source === "court_stan" || source === "court_dates",
+          ),
+        searchCourtRegistry: jest.fn().mockResolvedValue([
+          {
+            caseNumber: "760/123/26",
+          },
+        ]),
+        findCourtDateByCaseNumber: jest.fn().mockResolvedValue({
+          date: "25.03.2026 11:30",
+          judges: "Суддя",
+          caseNumber: "760/123/26",
+          courtName: "Шевченківський районний суд міста Києва",
+          courtRoom: "12",
+          caseInvolved: "Іваненко Іван Іванович",
+          caseDescription: "стягнення заборгованості",
+        }),
+      } as any,
+    );
+
+    const results = await indexedService.searchCourtDates({
+      query: "Іваненко Іван Іванович",
+      onlyUpcoming: true,
+    });
+
+    expect(results).toEqual([
+      {
+        date: "25.03.2026 11:30",
+        judges: "Суддя",
+        caseNumber: "760/123/26",
+        courtName: "Шевченківський районний суд міста Києва",
+        courtRoom: "12",
+        caseInvolved: "Іваненко Іван Іванович",
+        caseDescription: "стягнення заборгованості",
+      },
+    ]);
   });
 });

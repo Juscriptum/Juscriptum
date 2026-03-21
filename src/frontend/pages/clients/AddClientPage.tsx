@@ -227,7 +227,15 @@ export const AddClientPage: React.FC = () => {
 
   const handleRegistryRecordSelect = (result: CourtRegistrySearchResult) => {
     setSelectedRegistryRecord(result);
+    setRegistryError(null);
     applyRegistryResultToClientForm(result);
+    setIsRegistrySearchOpen(false);
+
+    if (typeof window !== "undefined") {
+      window.requestAnimationFrame(() => {
+        window.scrollTo({ top: 0, behavior: "smooth" });
+      });
+    }
   };
 
   const applyRegistryResultToClientForm = (
@@ -278,6 +286,13 @@ export const AddClientPage: React.FC = () => {
       {error && (
         <Alert type="error" onClose={() => setError(null)}>
           {error}
+        </Alert>
+      )}
+
+      {selectedRegistryRecord && (
+        <Alert type="info" onClose={() => setSelectedRegistryRecord(null)}>
+          Дані з реєстру перенесено у форму клієнта. Перевірте поля та
+          збережіть картку, коли будете готові.
         </Alert>
       )}
 
@@ -390,18 +405,21 @@ export const AddClientPage: React.FC = () => {
           </Alert>
         )}
 
-        {selectedRegistryRecord && (
-          <Alert type="info" onClose={() => setSelectedRegistryRecord(null)}>
-            Обрано запис реєстру. Дані клієнта вже перенесено у форму. Після
-            збереження можна одразу перейти до створення справи.
-          </Alert>
-        )}
-
         {registryResults.length > 0 && (
-          <div className="registry-results-table-wrapper">
-            <table className="registry-results-table">
+          <div className="client-registry-results-table-wrapper">
+            <table className="client-registry-results-table">
+              <colgroup>
+                <col className="client-registry-results-table__col client-registry-results-table__col--source" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--person" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--role" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--case" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--number" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--court" />
+                <col className="client-registry-results-table__col client-registry-results-table__col--action" />
+              </colgroup>
               <thead>
                 <tr>
+                  <th>Реєстр</th>
                   <th>Особа</th>
                   <th>Роль</th>
                   <th>Назва справи</th>
@@ -421,18 +439,19 @@ export const AddClientPage: React.FC = () => {
                     <tr
                       key={`${result.caseNumber}-${result.person}-${result.courtName}`}
                     >
+                      <td>{result.sourceLabel}</td>
                       <td>{result.person}</td>
                       <td>{result.role || "Не вказано"}</td>
                       <td>{result.caseDescription || "Без опису"}</td>
                       <td>{result.caseNumber}</td>
                       <td>{result.courtName}</td>
-                      <td>
+                      <td className="client-registry-results-table__action-cell">
                         <button
                           type="button"
-                          className={`btn ${isSelected ? "btn-primary" : "btn-outline"} registry-select-btn`}
+                          className={`btn ${isSelected ? "btn-primary" : "btn-outline"} client-registry-select-btn`}
                           onClick={() => handleRegistryRecordSelect(result)}
                         >
-                          {isSelected ? "Обрано" : "Заповнити клієнта"}
+                          {isSelected ? "Обрано" : "Заповнити"}
                         </button>
                       </td>
                     </tr>

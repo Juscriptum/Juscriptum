@@ -83,9 +83,17 @@ export interface CourtRegistrySearchResult {
 }
 
 export interface CourtRegistrySearchOptions {
-  query: string;
+  query?: string;
   dateFrom?: string;
   dateTo?: string;
+  source?: RegistrySource;
+  caseNumber?: string;
+  institutionName?: string;
+  role?: string;
+  status?: string;
+  judge?: string;
+  proceedingNumber?: string;
+  proceedingType?: string;
 }
 
 export interface CourtDateSearchResult {
@@ -96,6 +104,13 @@ export interface CourtDateSearchResult {
   courtRoom: string;
   caseInvolved: string;
   caseDescription: string;
+}
+
+export interface CourtDateSearchOptions {
+  query?: string;
+  caseNumber?: string;
+  limit?: number;
+  onlyUpcoming?: boolean;
 }
 
 interface DelimitedReaderOptions {
@@ -151,6 +166,8 @@ export class CourtRegistryService {
   async searchInCourtRegistry(
     options: CourtRegistrySearchOptions,
   ): Promise<CourtRegistrySearchResult[]> {
+    this.validateSearchOptions(options);
+
     if (this.registryIndexService) {
       try {
         const hasIndex =
@@ -167,12 +184,8 @@ export class CourtRegistryService {
       }
     }
 
-    const normalizedQuery = this.normalizeSearchValue(options.query);
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
     const dateRange = this.buildDateRange(options.dateFrom, options.dateTo);
-
-    if (!normalizedQuery) {
-      throw new BadRequestException("Пошуковий запит не може бути порожнім");
-    }
 
     const registryDirectory = await this.resolveDirectory(
       this.registryDirectories,
@@ -187,6 +200,7 @@ export class CourtRegistryService {
       try {
         const fileResults = await this.searchCourtRegistryFile(
           filePath,
+          options,
           normalizedQuery,
           dateRange,
         );
@@ -206,13 +220,22 @@ export class CourtRegistryService {
   async searchInCaseRegistries(
     options: CourtRegistrySearchOptions,
   ): Promise<CourtRegistrySearchResult[]> {
+    this.validateSearchOptions(options);
+
+    const shouldSearchCourt =
+      !options.source || options.source === "court_registry";
+    const shouldSearchAsvp = !options.source || options.source === "asvp";
     const [courtResults, asvpResults] = await Promise.allSettled([
-      this.searchInCourtRegistry(options),
-      this.withTimeout(
-        this.searchInAsvpRegistry(options),
-        this.combinedAsvpTimeoutMs,
-        "ASVP combined search timeout",
-      ),
+      shouldSearchCourt
+        ? this.searchInCourtRegistry(options)
+        : Promise.resolve([] as CourtRegistrySearchResult[]),
+      shouldSearchAsvp
+        ? this.withTimeout(
+            this.searchInAsvpRegistry(options),
+            this.combinedAsvpTimeoutMs,
+            "ASVP combined search timeout",
+          )
+        : Promise.resolve([] as CourtRegistrySearchResult[]),
     ]);
 
     if (courtResults.status === "rejected") {
@@ -244,6 +267,8 @@ export class CourtRegistryService {
   async searchInAsvpRegistry(
     options: CourtRegistrySearchOptions,
   ): Promise<CourtRegistrySearchResult[]> {
+    this.validateSearchOptions(options);
+
     if (this.registryIndexService) {
       try {
         const hasIndex =
@@ -260,12 +285,8 @@ export class CourtRegistryService {
       }
     }
 
-    const normalizedQuery = this.normalizeSearchValue(options.query);
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
     const dateRange = this.buildDateRange(options.dateFrom, options.dateTo);
-
-    if (!normalizedQuery) {
-      throw new BadRequestException("Пошуковий запит не може бути порожнім");
-    }
 
     const registryDirectory = await this.resolveDirectory(
       this.asvpDirectories,
@@ -280,7 +301,8 @@ export class CourtRegistryService {
       try {
         const fileResults = await this.searchAsvpFile(
           filePath,
-          options.query,
+          options.query || "",
+          options,
           normalizedQuery,
           dateRange,
         );
@@ -335,6 +357,39 @@ export class CourtRegistryService {
       return new Map();
     }
 
+    if (this.registryIndexService) {
+      try {
+        const hasIndex =
+          await this.registryIndexService.isIndexAvailableFor("court_dates");
+
+        if (hasIndex) {
+          const indexedMatches = await Promise.all(
+            Array.from(normalizedNumbers).map(async (normalizedCaseNumber) => {
+              const match =
+                await this.registryIndexService?.findCourtDateByCaseNumber(
+                  normalizedCaseNumber,
+                );
+
+              return match ? ([normalizedCaseNumber, match] as const) : null;
+            }),
+          );
+
+          return new Map(
+            indexedMatches.filter(
+              (value): value is readonly [string, CourtDateSearchResult] =>
+                Boolean(value),
+            ),
+          );
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Court dates indexed batch lookup failed, falling back to CSV scan: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     const directory = await this.resolveDirectory(
       this.courtDatesDirectories,
       "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
@@ -386,8 +441,216 @@ export class CourtRegistryService {
     return matches;
   }
 
+  async searchCourtDates(
+    options: CourtDateSearchOptions,
+  ): Promise<CourtDateSearchResult[]> {
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
+    const normalizedCaseNumber = this.normalizeCaseNumber(
+      options.caseNumber || "",
+    );
+    const limit = Math.max(1, options.limit || 10);
+
+    if (!normalizedQuery && !normalizedCaseNumber) {
+      return [];
+    }
+
+    if (normalizedCaseNumber && !normalizedQuery) {
+      const directMatch = await this.findCourtDateByCaseNumber(
+        options.caseNumber || "",
+      );
+
+      if (!directMatch) {
+        return [];
+      }
+
+      if (
+        options.onlyUpcoming &&
+        !this.isUpcomingCourtDateValue(directMatch.date, new Date())
+      ) {
+        return [];
+      }
+
+      return [directMatch];
+    }
+
+    const indexedResults = await this.searchCourtDatesViaRegistryIndex(
+      options,
+      normalizedQuery,
+      normalizedCaseNumber,
+      limit,
+    );
+
+    if (indexedResults.length > 0) {
+      return indexedResults;
+    }
+
+    const directory = await this.resolveDirectory(
+      this.courtDatesDirectories,
+      "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
+    );
+    const fileNames = await this.listCsvFiles(directory);
+    const now = new Date();
+    const deduplicatedMatches = new Map<string, CourtDateSearchResult>();
+
+    for (const fileName of fileNames) {
+      const filePath = path.join(directory, fileName);
+
+      try {
+        for await (const row of this.readDelimitedRows<CourtDateRow>(filePath, {
+          delimiter: "\t",
+          encoding: "utf-8",
+        })) {
+          if (
+            !this.matchesCourtDateRow(
+              row,
+              normalizedCaseNumber,
+              normalizedQuery,
+            )
+          ) {
+            continue;
+          }
+
+          const result: CourtDateSearchResult = {
+            date: row.date || "",
+            judges: row.judges || "",
+            caseNumber: row.case || "",
+            courtName: row.court_name || "",
+            courtRoom: row.court_room || "",
+            caseInvolved: row.case_involved || "",
+            caseDescription: row.case_description || "",
+          };
+
+          if (
+            options.onlyUpcoming &&
+            !this.isUpcomingCourtDateValue(result.date, now)
+          ) {
+            continue;
+          }
+
+          deduplicatedMatches.set(this.buildCourtDateMatchKey(result), result);
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Skipping court dates file ${fileName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    return Array.from(deduplicatedMatches.values())
+      .sort((left, right) => {
+        const leftTimestamp =
+          this.parseCourtDateValue(left.date)?.getTime() ??
+          Number.MAX_SAFE_INTEGER;
+        const rightTimestamp =
+          this.parseCourtDateValue(right.date)?.getTime() ??
+          Number.MAX_SAFE_INTEGER;
+
+        return leftTimestamp - rightTimestamp;
+      })
+      .slice(0, limit);
+  }
+
+  private async searchCourtDatesViaRegistryIndex(
+    options: CourtDateSearchOptions,
+    normalizedQuery: string,
+    normalizedCaseNumber: string,
+    limit: number,
+  ): Promise<CourtDateSearchResult[]> {
+    if (!this.registryIndexService) {
+      return [];
+    }
+
+    try {
+      const hasCourtRegistryIndex =
+        await this.registryIndexService.isIndexAvailableFor("court_stan");
+      const hasCourtDatesIndex =
+        await this.registryIndexService.isIndexAvailableFor("court_dates");
+
+      if (!hasCourtRegistryIndex || !hasCourtDatesIndex) {
+        return [];
+      }
+
+      const registryMatches =
+        await this.registryIndexService.searchCourtRegistry({
+          query: options.query,
+          caseNumber: options.caseNumber,
+        });
+      const candidateCaseNumbers = Array.from(
+        new Set(
+          registryMatches
+            .map((match) => match.caseNumber || "")
+            .filter((value) => {
+              const normalizedValue = this.normalizeCaseNumber(value);
+
+              if (!normalizedValue) {
+                return false;
+              }
+
+              if (
+                normalizedCaseNumber &&
+                normalizedValue !== normalizedCaseNumber
+              ) {
+                return false;
+              }
+
+              return !normalizedQuery || Boolean(normalizedValue);
+            }),
+        ),
+      ).slice(0, 50);
+
+      if (candidateCaseNumbers.length === 0) {
+        return [];
+      }
+
+      const now = new Date();
+      const registryIndexService = this.registryIndexService;
+      const indexedCourtDates = await candidateCaseNumbers.reduce(
+        async (accPromise, caseNumber) => {
+          const accumulator = await accPromise;
+          const result =
+            await registryIndexService.findCourtDateByCaseNumber(caseNumber);
+
+          if (result) {
+            accumulator.push(result);
+          }
+
+          return accumulator;
+        },
+        Promise.resolve([] as CourtDateSearchResult[]),
+      );
+
+      return indexedCourtDates
+        .filter((result) =>
+          options.onlyUpcoming
+            ? this.isUpcomingCourtDateValue(result.date, now)
+            : true,
+        )
+        .sort((left, right) => {
+          const leftTimestamp =
+            this.parseCourtDateValue(left.date)?.getTime() ??
+            Number.MAX_SAFE_INTEGER;
+          const rightTimestamp =
+            this.parseCourtDateValue(right.date)?.getTime() ??
+            Number.MAX_SAFE_INTEGER;
+
+          return leftTimestamp - rightTimestamp;
+        })
+        .slice(0, limit);
+    } catch (error) {
+      this.logger.warn(
+        `Court dates indexed lookup failed, falling back to direct scan: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return [];
+    }
+  }
+
   private async searchCourtRegistryFile(
     filePath: string,
+    options: CourtRegistrySearchOptions,
     normalizedQuery: string,
     dateRange?: { from?: number; to?: number },
   ): Promise<CourtRegistrySearchResult[]> {
@@ -398,22 +661,89 @@ export class CourtRegistryService {
       encoding: "utf-8",
     })) {
       results.push(
-        ...this.extractCourtMatches(row, normalizedQuery, dateRange),
+        ...this.extractCourtMatches(row, options, normalizedQuery, dateRange),
       );
     }
 
     return results;
   }
 
+  private matchesCourtDateRow(
+    row: CourtDateRow,
+    normalizedCaseNumber: string,
+    normalizedQuery: string,
+  ): boolean {
+    if (
+      normalizedCaseNumber &&
+      this.normalizeCaseNumber(row.case || "") !== normalizedCaseNumber
+    ) {
+      return false;
+    }
+
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    return [
+      row.case,
+      row.case_involved,
+      row.case_description,
+      row.court_name,
+      row.judges,
+    ]
+      .map((value) => this.normalizeSearchValue(value || ""))
+      .some((value) => value.includes(normalizedQuery));
+  }
+
+  private parseCourtDateValue(value: string): Date | null {
+    const match = value.match(/^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})$/);
+
+    if (!match) {
+      return null;
+    }
+
+    const [, day, month, year, hours, minutes] = match;
+    return new Date(
+      Number(year),
+      Number(month) - 1,
+      Number(day),
+      Number(hours),
+      Number(minutes),
+      0,
+      0,
+    );
+  }
+
+  private isUpcomingCourtDateValue(value: string, now: Date): boolean {
+    const parsedDate = this.parseCourtDateValue(value);
+
+    if (!parsedDate) {
+      return false;
+    }
+
+    return parsedDate.getTime() >= now.getTime();
+  }
+
+  private buildCourtDateMatchKey(result: CourtDateSearchResult): string {
+    return [
+      this.normalizeCaseNumber(result.caseNumber),
+      result.date.trim(),
+      this.normalizeSearchValue(result.courtName),
+      this.normalizeSearchValue(result.courtRoom),
+    ].join("|");
+  }
+
   private async searchAsvpFile(
     filePath: string,
     rawQuery: string,
+    options: CourtRegistrySearchOptions,
     normalizedQuery: string,
     dateRange?: { from?: number; to?: number },
   ): Promise<CourtRegistrySearchResult[]> {
     const fastResults = await this.searchAsvpFileWithNativeTools(
       filePath,
       rawQuery,
+      options,
       normalizedQuery,
       dateRange,
     );
@@ -435,7 +765,9 @@ export class CourtRegistryService {
       delimiter: ",",
       encoding: "asvp-repaired",
     })) {
-      results.push(...this.extractAsvpMatches(row, normalizedQuery, dateRange));
+      results.push(
+        ...this.extractAsvpMatches(row, options, normalizedQuery, dateRange),
+      );
     }
 
     return results;
@@ -444,13 +776,14 @@ export class CourtRegistryService {
   private async searchAsvpFileWithNativeTools(
     filePath: string,
     rawQuery: string,
+    options: CourtRegistrySearchOptions,
     normalizedQuery: string,
     dateRange?: { from?: number; to?: number },
   ): Promise<CourtRegistrySearchResult[] | null> {
     const rgQuery = rawQuery.trim().replace(/\s+/g, " ");
 
     if (!rgQuery) {
-      return [];
+      return null;
     }
 
     try {
@@ -484,7 +817,7 @@ export class CourtRegistryService {
             ) as unknown as AsvpRegistryRow,
         )
         .flatMap((row) =>
-          this.extractAsvpMatches(row, normalizedQuery, dateRange),
+          this.extractAsvpMatches(row, options, normalizedQuery, dateRange),
         );
     } catch (error) {
       this.logger.warn(
@@ -647,6 +980,7 @@ export class CourtRegistryService {
 
   private extractCourtMatches(
     row: CourtRegistryRow,
+    options: CourtRegistrySearchOptions,
     normalizedQuery: string,
     dateRange?: { from?: number; to?: number },
   ): CourtRegistrySearchResult[] {
@@ -666,7 +1000,12 @@ export class CourtRegistryService {
     return participants
       .map((participant) => this.parseParticipant(participant))
       .filter((participant) =>
-        participant.personNormalized.includes(normalizedQuery),
+        this.matchesCourtParticipant(
+          row,
+          participant,
+          options,
+          normalizedQuery,
+        ),
       )
       .map((participant) => ({
         source: "court_registry" as const,
@@ -683,11 +1022,15 @@ export class CourtRegistryService {
         stageDate: row.stage_date || "",
         stageName: row.stage_name || "",
         participants: row.participants || "",
-      }));
+      }))
+      .sort((left, right) =>
+        this.compareSearchResults(left.person, right.person, normalizedQuery),
+      );
   }
 
   private extractAsvpMatches(
     row: AsvpRegistryRow,
+    options: CourtRegistrySearchOptions,
     normalizedQuery: string,
     dateRange?: { from?: number; to?: number },
   ): CourtRegistrySearchResult[] {
@@ -697,10 +1040,28 @@ export class CourtRegistryService {
 
     const debtorName = (row.DEBTOR_NAME || "").trim();
     const creditorName = (row.CREDITOR_NAME || "").trim();
-    const debtorMatches =
-      this.normalizeSearchValue(debtorName).includes(normalizedQuery);
-    const creditorMatches =
-      this.normalizeSearchValue(creditorName).includes(normalizedQuery);
+    const normalizedDebtorName = this.normalizeSearchValue(debtorName);
+    const normalizedCreditorName = this.normalizeSearchValue(creditorName);
+    const debtorMatches = this.matchesAsvpParty(
+      row,
+      {
+        person: debtorName,
+        personNormalized: normalizedDebtorName,
+        role: "Боржник",
+      },
+      options,
+      normalizedQuery,
+    );
+    const creditorMatches = this.matchesAsvpParty(
+      row,
+      {
+        person: creditorName,
+        personNormalized: normalizedCreditorName,
+        role: "Стягувач",
+      },
+      options,
+      normalizedQuery,
+    );
 
     if (!debtorMatches && !creditorMatches) {
       return [];
@@ -752,7 +1113,9 @@ export class CourtRegistryService {
       });
     }
 
-    return results;
+    return results.sort((left, right) =>
+      this.compareSearchResults(left.person, right.person, normalizedQuery),
+    );
   }
 
   private buildAsvpParticipants(row: AsvpRegistryRow): string {
@@ -788,6 +1151,108 @@ export class CourtRegistryService {
       person,
       personNormalized: this.normalizeSearchValue(person),
     };
+  }
+
+  private matchesCourtParticipant(
+    row: CourtRegistryRow,
+    participant: {
+      role: string;
+      person: string;
+      personNormalized: string;
+    },
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): boolean {
+    return (
+      this.matchesSearchQuery(participant.personNormalized, normalizedQuery) &&
+      this.matchesContainsFilter(
+        this.normalizeCaseNumber(row.case_number || ""),
+        this.normalizeCaseNumber(options.caseNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.court_name || ""),
+        this.normalizeSearchValue(options.institutionName || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(participant.role),
+        this.normalizeSearchValue(options.role || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.stage_name || ""),
+        this.normalizeSearchValue(options.status || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.judge || ""),
+        this.normalizeSearchValue(options.judge || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.case_proc || ""),
+        this.normalizeSearchValue(options.proceedingNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.type || ""),
+        this.normalizeSearchValue(options.proceedingType || ""),
+      )
+    );
+  }
+
+  private matchesAsvpParty(
+    row: AsvpRegistryRow,
+    party: { person: string; personNormalized: string; role: string },
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): boolean {
+    return (
+      this.matchesSearchQuery(party.personNormalized, normalizedQuery) &&
+      this.matchesContainsFilter(
+        this.normalizeCaseNumber(row.VP_ORDERNUM || ""),
+        this.normalizeCaseNumber(options.caseNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.ORG_NAME || ""),
+        this.normalizeSearchValue(options.institutionName || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(party.role),
+        this.normalizeSearchValue(options.role || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.VP_STATE || ""),
+        this.normalizeSearchValue(options.status || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.DVS_CODE || ""),
+        this.normalizeSearchValue(options.proceedingNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue("Виконавче провадження"),
+        this.normalizeSearchValue(options.proceedingType || ""),
+      )
+    );
+  }
+
+  private validateSearchOptions(options: CourtRegistrySearchOptions): void {
+    const hasDateRange = Boolean(options.dateFrom || options.dateTo);
+    const hasPrimaryFilter = Boolean(
+      (options.query || "").trim() ||
+      (options.caseNumber || "").trim() ||
+      (options.institutionName || "").trim() ||
+      (options.judge || "").trim() ||
+      (options.proceedingNumber || "").trim(),
+    );
+    const hasSecondaryFilter = Boolean(
+      (options.role || "").trim() ||
+      (options.status || "").trim() ||
+      (options.proceedingType || "").trim(),
+    );
+
+    if (hasPrimaryFilter || (hasSecondaryFilter && hasDateRange)) {
+      return;
+    }
+
+    throw new BadRequestException(
+      "Уточніть пошук: вкажіть ПІБ/запит, номер справи або провадження, суд чи орган, суддю або додайте період разом зі статусом, роллю чи типом провадження.",
+    );
   }
 
   private buildDateRange(
@@ -1067,5 +1532,117 @@ export class CourtRegistryService {
       .replace(/\s+/g, "")
       .replace(/[‐‑‒–—―]/g, "-")
       .toLocaleLowerCase("uk-UA");
+  }
+
+  private matchesSearchQuery(
+    normalizedCandidate: string,
+    normalizedQuery: string,
+  ): boolean {
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    if (normalizedCandidate.includes(normalizedQuery)) {
+      return true;
+    }
+
+    const candidateTokens = this.tokenizeSearchValue(normalizedCandidate);
+    const queryTokens = this.tokenizeSearchValue(normalizedQuery);
+
+    if (queryTokens.length === 0) {
+      return false;
+    }
+
+    return queryTokens.every((queryToken) =>
+      candidateTokens.some(
+        (candidateToken) =>
+          candidateToken === queryToken ||
+          candidateToken.startsWith(queryToken) ||
+          queryToken.startsWith(candidateToken),
+      ),
+    );
+  }
+
+  private matchesContainsFilter(
+    normalizedCandidate: string,
+    normalizedFilter: string,
+  ): boolean {
+    if (!normalizedFilter) {
+      return true;
+    }
+
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    return normalizedCandidate.includes(normalizedFilter);
+  }
+
+  private compareSearchResults(
+    leftValue: string,
+    rightValue: string,
+    normalizedQuery: string,
+  ): number {
+    const leftScore = this.getSearchScore(leftValue, normalizedQuery);
+    const rightScore = this.getSearchScore(rightValue, normalizedQuery);
+
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+
+    return leftValue.localeCompare(rightValue, "uk-UA");
+  }
+
+  private getSearchScore(value: string, normalizedQuery: string): number {
+    const normalizedValue = this.normalizeSearchValue(value);
+
+    if (!normalizedValue || !normalizedQuery) {
+      return 0;
+    }
+
+    const valueTokens = this.tokenizeSearchValue(normalizedValue);
+    const queryTokens = this.tokenizeSearchValue(normalizedQuery);
+    let score = 0;
+
+    if (normalizedValue === normalizedQuery) {
+      score += 1000;
+    } else if (normalizedValue.startsWith(normalizedQuery)) {
+      score += 700;
+    } else if (normalizedValue.includes(normalizedQuery)) {
+      score += 500;
+    }
+
+    queryTokens.forEach((queryToken, index) => {
+      const tokenIndex = valueTokens.findIndex(
+        (valueToken) =>
+          valueToken === queryToken ||
+          valueToken.startsWith(queryToken) ||
+          queryToken.startsWith(valueToken),
+      );
+
+      if (tokenIndex === -1) {
+        return;
+      }
+
+      score += valueTokens[tokenIndex] === queryToken ? 120 : 80;
+
+      if (tokenIndex === index) {
+        score += 30;
+      }
+    });
+
+    score -= Math.abs(normalizedValue.length - normalizedQuery.length);
+    return score;
+  }
+
+  private tokenizeSearchValue(value: string): string[] {
+    return value
+      .split(/[-\s"'.,;:()[\]{}\\+/]+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
   }
 }

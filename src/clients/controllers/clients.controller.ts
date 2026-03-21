@@ -90,19 +90,43 @@ export class ClientsController {
   @ApiOperation({
     summary: "Search court and enforcement registry CSV files by participant",
   })
-  @ApiQuery({ name: "query", required: true, type: String })
+  @ApiQuery({ name: "query", required: false, type: String })
   @ApiQuery({ name: "dateFrom", required: false, type: String })
   @ApiQuery({ name: "dateTo", required: false, type: String })
+  @ApiQuery({ name: "source", required: false, type: String })
+  @ApiQuery({ name: "caseNumber", required: false, type: String })
+  @ApiQuery({ name: "institutionName", required: false, type: String })
+  @ApiQuery({ name: "role", required: false, type: String })
+  @ApiQuery({ name: "status", required: false, type: String })
+  @ApiQuery({ name: "judge", required: false, type: String })
+  @ApiQuery({ name: "proceedingNumber", required: false, type: String })
+  @ApiQuery({ name: "proceedingType", required: false, type: String })
   @ApiResponse({ status: 200, description: "Registry search results returned" })
   async searchCourtRegistry(
-    @Query("query") query: string,
+    @Query("query") query?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
+    @Query("source") source?: "court_registry" | "asvp",
+    @Query("caseNumber") caseNumber?: string,
+    @Query("institutionName") institutionName?: string,
+    @Query("role") role?: string,
+    @Query("status") status?: string,
+    @Query("judge") judge?: string,
+    @Query("proceedingNumber") proceedingNumber?: string,
+    @Query("proceedingType") proceedingType?: string,
   ): Promise<CourtRegistrySearchResult[]> {
     return this.courtRegistryService.searchInCaseRegistries({
       query,
       dateFrom,
       dateTo,
+      source,
+      caseNumber,
+      institutionName,
+      role,
+      status,
+      judge,
+      proceedingNumber,
+      proceedingType,
     });
   }
 

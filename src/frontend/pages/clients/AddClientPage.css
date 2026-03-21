@@ -77,22 +77,23 @@
     accent-color: var(--color-accent-600);
 }
 
-.registry-results-table-wrapper {
+.client-registry-results-table-wrapper {
     overflow-x: auto;
+    overflow-y: visible;
     border: 1px solid rgba(20, 32, 51, 0.07);
     border-radius: 1.25rem;
     background: rgba(255, 255, 255, 0.95);
 }
 
-.registry-results-table {
+.client-registry-results-table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 0;
+    min-width: 960px;
     table-layout: fixed;
 }
 
-.registry-results-table th,
-.registry-results-table td {
+.client-registry-results-table th,
+.client-registry-results-table td {
     padding: 0.75rem 0.7rem;
     border-bottom: 1px solid rgba(18, 32, 51, 0.07);
     text-align: left;
@@ -101,7 +102,7 @@
     word-break: break-word;
 }
 
-.registry-results-table th {
+.client-registry-results-table th {
     position: sticky;
     top: 0;
     background: #f3f7fc;
@@ -112,43 +113,44 @@
     color: var(--color-accent-700);
 }
 
-.registry-results-table td {
+.client-registry-results-table td {
     font-size: 0.82rem;
     line-height: 1.35;
 }
 
-.registry-results-table th:nth-child(1),
-.registry-results-table td:nth-child(1) {
-    width: 18%;
-}
-
-.registry-results-table th:nth-child(2),
-.registry-results-table td:nth-child(2) {
+.client-registry-results-table__col--source {
     width: 12%;
 }
 
-.registry-results-table th:nth-child(3),
-.registry-results-table td:nth-child(3) {
-    width: 31%;
-}
-
-.registry-results-table th:nth-child(4),
-.registry-results-table td:nth-child(4) {
-    width: 12%;
-}
-
-.registry-results-table th:nth-child(5),
-.registry-results-table td:nth-child(5) {
+.client-registry-results-table__col--person {
     width: 17%;
 }
 
-.registry-results-table th:nth-child(6),
-.registry-results-table td:nth-child(6) {
-    width: 10%;
+.client-registry-results-table__col--role {
+    width: 12%;
 }
 
-.registry-select-btn {
+.client-registry-results-table__col--case {
+    width: 23%;
+}
+
+.client-registry-results-table__col--number {
+    width: 12%;
+}
+
+.client-registry-results-table__col--court {
+    width: 16%;
+}
+
+.client-registry-results-table__col--action {
+    width: 8%;
+}
+
+.client-registry-results-table__action-cell {
     white-space: nowrap;
+}
+
+.client-registry-select-btn {
     width: 100%;
     min-height: var(--control-height-md);
     padding-inline: 0.55rem;

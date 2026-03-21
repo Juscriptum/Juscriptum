@@ -319,22 +319,24 @@ describe("CasesController (e2e)", () => {
     let testCaseId: string;
 
     beforeAll(async () => {
-      const testCase = await caseRepository.save(caseRepository.create({
-        tenantId,
-        caseNumber: "757/20001/23-ц",
-        caseType: "judicial_case",
-        clientId,
-        assignedLawyerId: userId,
-        priority: "medium",
-        status: "active",
-        title: "Test Case for Detail View",
-        description: "Detailed description",
-        courtName: "Печерський суд",
-        judgeName: "Іванов І.І.",
-        plaintiffName: "Позивач",
-        defendantName: "Відповідач",
-        metadata: {},
-      }));
+      const testCase = await caseRepository.save(
+        caseRepository.create({
+          tenantId,
+          caseNumber: "757/20001/23-ц",
+          caseType: "judicial_case",
+          clientId,
+          assignedLawyerId: userId,
+          priority: "medium",
+          status: "active",
+          title: "Test Case for Detail View",
+          description: "Detailed description",
+          courtName: "Печерський суд",
+          judgeName: "Іванов І.І.",
+          plaintiffName: "Позивач",
+          defendantName: "Відповідач",
+          metadata: {},
+        }),
+      );
       testCaseId = testCase.id;
     });
 
@@ -362,17 +364,19 @@ describe("CasesController (e2e)", () => {
     let testCaseId: string;
 
     beforeAll(async () => {
-      const testCase = await caseRepository.save(caseRepository.create({
-        tenantId,
-        caseNumber: "757/30001/23-ц",
-        caseType: "judicial_case",
-        clientId,
-        assignedLawyerId: userId,
-        priority: "low",
-        status: "draft",
-        title: "Case to Update",
-        metadata: {},
-      }));
+      const testCase = await caseRepository.save(
+        caseRepository.create({
+          tenantId,
+          caseNumber: "757/30001/23-ц",
+          caseType: "judicial_case",
+          clientId,
+          assignedLawyerId: userId,
+          priority: "low",
+          status: "draft",
+          title: "Case to Update",
+          metadata: {},
+        }),
+      );
       testCaseId = testCase.id;
     });
 
@@ -413,17 +417,19 @@ describe("CasesController (e2e)", () => {
     let testCaseId: string;
 
     beforeAll(async () => {
-      const testCase = await caseRepository.save(caseRepository.create({
-        tenantId,
-        caseNumber: "757/40001/23-ц",
-        caseType: "judicial_case",
-        clientId,
-        assignedLawyerId: userId,
-        priority: "medium",
-        status: "active",
-        title: "Case for Status Change",
-        metadata: {},
-      }));
+      const testCase = await caseRepository.save(
+        caseRepository.create({
+          tenantId,
+          caseNumber: "757/40001/23-ц",
+          caseType: "judicial_case",
+          clientId,
+          assignedLawyerId: userId,
+          priority: "medium",
+          status: "active",
+          title: "Case for Status Change",
+          metadata: {},
+        }),
+      );
       testCaseId = testCase.id;
     });
 
@@ -455,17 +461,19 @@ describe("CasesController (e2e)", () => {
     let testCaseId: string;
 
     beforeAll(async () => {
-      const testCase = await caseRepository.save(caseRepository.create({
-        tenantId,
-        caseNumber: "757/50001/23-ц",
-        caseType: "judicial_case",
-        clientId,
-        assignedLawyerId: userId,
-        priority: "medium",
-        status: "active",
-        title: "Case to Delete",
-        metadata: {},
-      }));
+      const testCase = await caseRepository.save(
+        caseRepository.create({
+          tenantId,
+          caseNumber: "757/50001/23-ц",
+          caseType: "judicial_case",
+          clientId,
+          assignedLawyerId: userId,
+          priority: "medium",
+          status: "active",
+          title: "Case to Delete",
+          metadata: {},
+        }),
+      );
       testCaseId = testCase.id;
     });
 
@@ -539,17 +547,19 @@ describe("CasesController (e2e)", () => {
 
     it("should not allow cross-tenant access", async () => {
       // Create case in original tenant
-      const testCase = await caseRepository.save(caseRepository.create({
-        tenantId,
-        caseNumber: "757/90001/23-ц",
-        caseType: "judicial_case",
-        clientId,
-        assignedLawyerId: userId,
-        priority: "medium",
-        status: "active",
-        title: "Tenant Isolation Test",
-        metadata: {},
-      }));
+      const testCase = await caseRepository.save(
+        caseRepository.create({
+          tenantId,
+          caseNumber: "757/90001/23-ц",
+          caseType: "judicial_case",
+          clientId,
+          assignedLawyerId: userId,
+          priority: "medium",
+          status: "active",
+          title: "Tenant Isolation Test",
+          metadata: {},
+        }),
+      );
 
       // Try to access with other tenant's token
       return request(app.getHttpServer())

@@ -4,13 +4,29 @@ import { InjectRepository } from "@nestjs/typeorm";
 import { IsNull, Not, Repository } from "typeorm";
 import { shouldRunScheduledTasks } from "../../common/runtime/scheduled-tasks";
 import { Case } from "../../database/entities/Case.entity";
+import { Client } from "../../database/entities/Client.entity";
 import { Event } from "../../database/entities/Event.entity";
 import {
   CourtDateSearchResult,
+  CourtDateSearchOptions,
   CourtRegistryService,
 } from "../../clients/services/court-registry.service";
 
 const AUTO_SYNC_SOURCE = "court_dates";
+
+export interface RegistryHearingSuggestion {
+  caseId: string;
+  caseNumber: string;
+  registryCaseNumber: string | null;
+  date: string;
+  courtName: string;
+  courtRoom: string;
+  judges: string;
+  caseInvolved: string;
+  caseDescription: string;
+  matchedBy: string[];
+  eventAlreadyExists: boolean;
+}
 
 @Injectable()
 export class CaseRegistrySyncService {
@@ -42,6 +58,56 @@ export class CaseRegistrySyncService {
     }
 
     await this.upsertCourtEvent(caseEntity, match, userId);
+  }
+
+  async getRegistryHearingSuggestion(
+    caseEntity: Case & { client?: Client | null },
+  ): Promise<RegistryHearingSuggestion | null> {
+    if (!this.isCourtSuggestionEligible(caseEntity)) {
+      return null;
+    }
+
+    const resolvedMatch = await this.resolveCourtDateMatch(caseEntity);
+
+    if (!resolvedMatch) {
+      return null;
+    }
+
+    const eventAlreadyExists = await this.hasLinkedCourtEvent(
+      caseEntity,
+      resolvedMatch.match,
+    );
+
+    return {
+      caseId: caseEntity.id,
+      caseNumber: caseEntity.caseNumber,
+      registryCaseNumber: caseEntity.registryCaseNumber || null,
+      date: resolvedMatch.match.date,
+      courtName: resolvedMatch.match.courtName,
+      courtRoom: resolvedMatch.match.courtRoom,
+      judges: resolvedMatch.match.judges,
+      caseInvolved: resolvedMatch.match.caseInvolved,
+      caseDescription: resolvedMatch.match.caseDescription,
+      matchedBy: resolvedMatch.matchedBy,
+      eventAlreadyExists,
+    };
+  }
+
+  async createSuggestedCourtEvent(
+    caseEntity: Case & { client?: Client | null },
+    userId?: string,
+  ): Promise<Event> {
+    if (!this.isCourtSuggestionEligible(caseEntity)) {
+      throw new Error("Для цієї справи пошук засідання в реєстрі недоступний.");
+    }
+
+    const resolvedMatch = await this.resolveCourtDateMatch(caseEntity);
+
+    if (!resolvedMatch) {
+      throw new Error("Не знайдено найближчого засідання у `court_dates`.");
+    }
+
+    return this.upsertCourtEvent(caseEntity, resolvedMatch.match, userId);
   }
 
   @Cron("0 0 10 * * *", { timeZone: "Etc/GMT-1" })
@@ -108,11 +174,138 @@ export class CaseRegistrySyncService {
     );
   }
 
+  private isCourtSuggestionEligible(
+    caseEntity: Case & { client?: Client | null },
+  ): boolean {
+    return (
+      caseEntity.caseType === "judicial_case" &&
+      !caseEntity.deletedAt &&
+      (Boolean((caseEntity.registryCaseNumber || "").trim()) ||
+        this.buildParticipantQueries(caseEntity).length > 0)
+    );
+  }
+
+  private async resolveCourtDateMatch(
+    caseEntity: Case & { client?: Client | null },
+  ): Promise<{ match: CourtDateSearchResult; matchedBy: string[] } | null> {
+    const candidateSearches: Array<{
+      options: CourtDateSearchOptions;
+      matchedBy: string[];
+    }> = [];
+    const seenSearches = new Set<string>();
+
+    const addCandidate = (
+      options: CourtDateSearchOptions,
+      matchedBy: string[],
+    ) => {
+      const key = JSON.stringify({
+        query: options.query || "",
+        caseNumber: options.caseNumber || "",
+      });
+
+      if (seenSearches.has(key)) {
+        return;
+      }
+
+      seenSearches.add(key);
+      candidateSearches.push({ options, matchedBy });
+    };
+
+    if ((caseEntity.registryCaseNumber || "").trim()) {
+      addCandidate(
+        {
+          caseNumber: caseEntity.registryCaseNumber || "",
+          onlyUpcoming: true,
+          limit: 5,
+        },
+        ["case_number"],
+      );
+    }
+
+    for (const query of this.buildParticipantQueries(caseEntity)) {
+      addCandidate(
+        {
+          query,
+          caseNumber: caseEntity.registryCaseNumber || undefined,
+          onlyUpcoming: true,
+          limit: 5,
+        },
+        caseEntity.registryCaseNumber
+          ? ["case_number", "participant_name"]
+          : ["participant_name"],
+      );
+    }
+
+    let bestMatch: {
+      match: CourtDateSearchResult;
+      matchedBy: string[];
+    } | null = null;
+
+    for (const candidate of candidateSearches) {
+      const matches = await this.courtRegistryService.searchCourtDates(
+        candidate.options,
+      );
+      const nearestMatch = matches.find((match) =>
+        this.parseCourtDate(match.date),
+      );
+
+      if (!nearestMatch) {
+        continue;
+      }
+
+      if (
+        !bestMatch ||
+        this.isCourtDateEarlier(nearestMatch.date, bestMatch.match.date)
+      ) {
+        bestMatch = {
+          match: nearestMatch,
+          matchedBy: candidate.matchedBy,
+        };
+      }
+    }
+
+    return bestMatch;
+  }
+
+  private buildParticipantQueries(
+    caseEntity: Case & { client?: Client | null },
+  ): string[] {
+    const values = [
+      this.getClientDisplayName(caseEntity.client || null),
+      caseEntity.plaintiffName || "",
+      caseEntity.defendantName || "",
+      caseEntity.thirdParties || "",
+    ];
+
+    return Array.from(
+      new Set(
+        values
+          .map((value) => value.trim())
+          .filter((value) => value.length >= 5),
+      ),
+    );
+  }
+
+  private getClientDisplayName(client: Client | null): string {
+    if (!client) {
+      return "";
+    }
+
+    const personalName =
+      `${client.lastName || ""} ${client.firstName || ""} ${client.patronymic || ""}`.trim();
+
+    if (client.type !== "legal_entity" && personalName) {
+      return personalName;
+    }
+
+    return client.companyName || "";
+  }
+
   private async upsertCourtEvent(
     caseEntity: Case,
     match: CourtDateSearchResult,
     userId?: string,
-  ): Promise<void> {
+  ): Promise<Event> {
     const existingEvents = await this.eventRepository.find({
       where: {
         tenantId: caseEntity.tenantId,
@@ -132,7 +325,7 @@ export class CaseRegistrySyncService {
       this.logger.warn(
         `Skipping court event sync for case ${caseEntity.id}: invalid date "${match.date}"`,
       );
-      return;
+      throw new Error(`Invalid court date "${match.date}"`);
     }
 
     const [eventDate, eventTime] = parsedDate;
@@ -170,8 +363,7 @@ export class CaseRegistrySyncService {
 
     if (existingEvent) {
       Object.assign(existingEvent, eventPayload);
-      await this.eventRepository.save(existingEvent);
-      return;
+      return this.eventRepository.save(existingEvent);
     }
 
     const createdEvent = this.eventRepository.create({
@@ -184,7 +376,44 @@ export class CaseRegistrySyncService {
         null,
     } as Partial<Event>);
 
-    await this.eventRepository.save(createdEvent);
+    return this.eventRepository.save(createdEvent);
+  }
+
+  private async hasLinkedCourtEvent(
+    caseEntity: Case,
+    match: CourtDateSearchResult,
+  ): Promise<boolean> {
+    const parsedDate = this.parseCourtDate(match.date);
+
+    if (!parsedDate) {
+      return false;
+    }
+
+    const [eventDate, eventTime] = parsedDate;
+    const expectedTimestamp = eventDate.getTime();
+    const normalizedCaseNumber = this.normalizeCaseNumber(match.caseNumber);
+    const existingEvents = await this.eventRepository.find({
+      where: {
+        tenantId: caseEntity.tenantId,
+        caseId: caseEntity.id,
+        type: "court_sitting",
+        deletedAt: IsNull(),
+      },
+    });
+
+    return existingEvents.some((event) => {
+      const sameTime =
+        event.eventDate instanceof Date &&
+        event.eventDate.getTime() === expectedTimestamp &&
+        (event.eventTime || "") === eventTime;
+      const normalizedEventCaseNumber = this.normalizeCaseNumber(
+        event.participants?.registryCaseNumber ||
+          event.participants?.caseNumber ||
+          "",
+      );
+
+      return sameTime && normalizedEventCaseNumber === normalizedCaseNumber;
+    });
   }
 
   private async clearAutoCourtEventsForCase(
@@ -245,6 +474,29 @@ export class CaseRegistrySyncService {
     );
 
     return [eventDate, `${hours}:${minutes}`];
+  }
+
+  private isCourtDateEarlier(left: string, right: string): boolean {
+    const leftDate = this.parseCourtDate(left)?.[0];
+    const rightDate = this.parseCourtDate(right)?.[0];
+
+    if (!leftDate) {
+      return false;
+    }
+
+    if (!rightDate) {
+      return true;
+    }
+
+    return leftDate.getTime() < rightDate.getTime();
+  }
+
+  private normalizeCaseNumber(value: string): string {
+    return value
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/[‐‑‒–—―]/g, "-")
+      .toLocaleLowerCase("uk-UA");
   }
 
   private buildEventDescription(match: CourtDateSearchResult): string {

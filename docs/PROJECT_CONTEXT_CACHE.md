@@ -4,8 +4,308 @@
 
 ## Snapshot Date
 
-- Updated: 2026-03-13
-- Scope: full-project reassessment, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, mobile scan-session/PDF foundation, and authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage
+- Updated: 2026-03-21
+- Scope: local resource audit and runtime/git cleanup, day-one scope decision, staging prep pack, staging env template alignment, launch-readiness status refresh, non-code launch blocker mapping, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, archive page category tabs, client registry search overlay fit/autofill polish, mobile scan-session/PDF foundation, and authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage
+
+## 2026-03-21 Client Registry Search Overlay Fit And Autofill Flow
+
+- Updated the client-side registry search flow in:
+  - `src/frontend/pages/clients/AddClientPage.tsx`
+  - `src/frontend/pages/clients/AddClientPage.css`
+  - `src/frontend/components/RegistrySearchOverlay.css`
+- UI behavior now:
+  - keeps the overlay height inside the current viewport with internal scrolling for results
+  - gives explicit width to all 7 client registry table columns so the action column no longer forces the table wider than the visible modal
+  - closes the overlay immediately after `Заповнити`, scrolls back to the client form, and shows a page-level confirmation that registry data was imported into the form
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+    - existing Vite circular/manual-chunk and large-chunk warnings remain
+
+## 2026-03-21 Local Resource Audit And Runtime/Git Cleanup
+
+- Audited workstation resource pressure after a report showing heavy CPU/memory use and confirmed the dominant local contributors were:
+  - oversized `.git/objects` packs plus leftover `tmp_pack_*` garbage
+  - generated/runtime artifacts tracked in git, especially `dist/`, `storage/`, `tmp/`, and local registry CSV snapshots
+  - the default API dev scripts still being able to run scheduled/background work inside the same watch process
+  - a large shared-registry SQLite WAL file under `storage/registry-index.db-wal`
+- Updated local dev scripts in `package.json`:
+  - `npm run start:dev` now sets `RUN_SCHEDULED_JOBS=false`
+  - `npm run start:all` inherits the same lighter API behavior
+  - added `npm run start:dev:with-jobs` for the old all-in-one API path
+  - added `npm run start:worker:dev` for explicit local worker execution
+- Expanded `.gitignore` to ignore generated/runtime-heavy paths:
+  - `dist/`
+  - `storage/`
+  - `tmp/`
+  - registry CSV snapshots
+  - SQLite db / shm / wal files
+- Updated `src/registry-index/services/registry-index.service.ts` so shared index rebuilds now run `wal_checkpoint(TRUNCATE)` after rebuild cycles, reducing persistent WAL growth and disk churn.
+- Local audit findings gathered in this session:
+  - repo size was about `23G`
+  - `.git` was about `18G`
+  - `storage` was about `3.4G`
+  - `storage/registry-index.db` was about `1.6G`
+  - `storage/registry-index.db-wal` was about `1.7G`
+  - `git count-objects -vH` reported about `5.17 GiB` of git garbage from leftover temporary pack files
+- Final history-cleanup actions completed in this session:
+  - created a full backup bundle in `../repo-history-backups/`
+  - preserved the original heavy git directory in `../repo-history-backups/original-dotgit-20260321`
+  - created a mirror clone and rewrote history to remove:
+    - `dist/`
+    - `storage/`
+    - `tmp/`
+    - `court_stan/`
+    - `court_dates/`
+    - `asvp/`
+    - `uploads/`
+    - historical `node_modules/`
+  - replaced the local `.git` with the cleaned history without touching the working tree files
+  - expanded `.gitignore` again to keep `uploads/`, `logs/`, and `firebase-debug.log` out of future git scans
+- Verification run in this session:
+  - `npm run build` -> PASS
+  - `npm run lint` -> PASS
+  - `git count-objects -vH` -> PASS after cleanup
+    - git garbage reduced to `0 bytes`
+  - `du -sh .git storage` -> PASS after cleanup
+    - `.git` dropped from about `18G` to about `13G`
+    - `storage` dropped from about `3.4G` to about `1.7G`
+  - `node -e "const Database=require('better-sqlite3'); ... wal_checkpoint(TRUNCATE) ..."` -> PASS
+    - `storage/registry-index.db-wal` reduced to `0B`
+  - `git-filter-repo --analyze` on the mirror repo -> PASS
+  - `git-filter-repo --force --invert-paths ...` on the mirror repo -> PASS
+  - `git count-objects -vH` after replacing local `.git` -> PASS
+    - cleaned local repo now uses one pack of about `76.75 MiB`
+  - `du -sh .git ../repo-history-backups/original-dotgit-20260321` -> PASS
+    - cleaned working `.git` about `95M`
+    - preserved pre-rewrite `.git` backup about `13G`
+  - `npm run build` after replacing the local `.git` -> PASS
+
+## 2026-03-20 Archive Page Category Tabs
+
+- Reworked `src/frontend/pages/archive/ArchivePage.tsx` into a tabbed archive surface with separate categories for:
+  - clients
+  - cases
+  - events
+  - pricelists
+  - documents
+  - calculations
+  - templates
+  - notes
+- Added dedicated styling in:
+  - `src/frontend/pages/archive/ArchivePage.css`
+- Real archived data is now surfaced directly for:
+  - clients
+  - cases
+  - documents
+  - pricelists
+  - templates
+- Placeholder-but-ready archive tabs now exist for categories that do not yet have a dedicated archive status in the current code:
+  - events
+  - calculations
+  - notes
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+    - Vite still reports the existing circular/manual-chunk and large-chunk warnings
+
+## 2026-03-20 Client Delete/Archive Cascade To Cases
+
+- Updated `src/clients/services/client.service.ts` so:
+  - soft-deleting a client also soft-deletes that client's active cases in the same transaction
+  - archiving a client through `update({ status: "archived" })` also sets that client's active cases to `status: "archived"` in the same transaction
+- Updated `src/clients/clients.module.ts` to include the `Case` repository in the client module
+- Added service coverage in:
+  - `src/clients/services/client.service.spec.ts`
+    - verifies case soft-delete cascade on client delete
+    - verifies case archive cascade on client archive
+- Verification run in this session:
+  - `npm test -- --runInBand src/clients/services/client.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+
+## 2026-03-20 Shared Registry Generalization + Startup/Folder Auto-Import
+
+## 2026-03-20 Shared Registry Raw Row Payload Removal
+
+- Removed unused duplicated `raw_row_json` payload storage from the shared registry SQLite cache for:
+  - `asvp_records`
+  - `court_dates`
+- Updated `src/registry-index/services/registry-index.service.ts` so:
+  - new shared-index imports no longer store raw duplicated CSV rows in SQLite
+  - startup migrates legacy SQLite tables that still contain `raw_row_json`
+  - the ASVP FTS table is rebuilt during that migration
+  - SQLite runs one-time compaction after the migration to reclaim file space
+- `court_stan` already had no `raw_row_json` column, so it required no schema change
+- Added coverage in:
+  - `src/registry-index/services/registry-index.service.spec.ts`
+    - verifies legacy `raw_row_json` columns are removed while `court_dates` and `asvp` remain searchable
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts`
+  - `npm run build`
+
+## 2026-03-20 Shared Registry Cleanup On Unchanged Verification
+
+- Updated `src/registry-index/services/registry-index.service.ts` so non-force verification passes now delete already-verified source CSV files when:
+  - the shared index signature already matches the current source directory
+  - the last import status is successful
+  - source-file deletion is enabled for that registry source
+- This closes the case where CSV files already existed before application startup and the rebuild path skipped import as unchanged before consume/delete cleanup could run
+- Added coverage in:
+  - `src/registry-index/services/registry-index.service.spec.ts`
+    - verifies unchanged `court_stan` and `court_dates` files are removed on a non-force verification pass after an initial successful import
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts`
+  - `npm run build`
+
+- Replaced the ASVP-only helper with a shared preprocessing module:
+  - `src/registry-index/services/registry-source-import-preparation.ts`
+- Generalized the consume-on-success shared-index flow to:
+  - `court_stan`
+  - `court_dates`
+  - `asvp`
+- New shared registry behavior:
+  - oversized source CSVs are pre-split into temporary year-based UTF-8 chunks before SQLite import
+  - successfully imported source CSVs are deleted by default after the shared SQLite commit
+  - when a consumed source directory becomes empty, the last successful shared index is preserved instead of being cleared
+  - in-process rebuilds are serialized per source to reduce duplicate rebuild contention inside one Nest runtime
+- Added new automatic import triggers:
+  - `src/registry-index/services/registry-index.source-monitor.service.ts`
+    - detects new or changed CSV files in `court_stan/`, `court_dates/`, and `asvp/` on a short polling interval and starts a rebuild automatically
+  - `src/external-data/services/external-data.bootstrap.service.ts`
+    - runs `ExternalDataService.updateExternalData()` once on application bootstrap when external URLs are configured
+- Adjusted startup orchestration:
+  - `src/registry-index/services/registry-index.bootstrap.service.ts` now skips local warmup when external-data URLs are configured, so startup refresh responsibility moves to the external-data bootstrap path
+- Updated docs:
+  - `RUN.md`
+  - `CLAUDE.md`
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts` -> PASS (5/5)
+  - `npm test -- --runInBand src/external-data/services/external-data.service.spec.ts` -> PASS (2/2)
+  - `npm run build` -> PASS
+
+## 2026-03-20 ASVP Snapshot Pre-Split + Consume-On-Success Import
+
+- Added dedicated ASVP preprocessing logic in:
+  - `src/registry-index/services/registry-source-import-preparation.ts`
+- Updated `src/registry-index/services/registry-index.service.ts` so ASVP imports now:
+  - stream large source snapshots through a pre-splitting step before SQLite ingestion
+  - split oversized files into temporary year-based UTF-8 chunks before inserting rows into `storage/registry-index.db`
+  - keep the registry index shared across users instead of moving registry data into tenant-scoped business tables
+  - delete successfully imported ASVP source CSV files after the shared SQLite commit by default
+  - preserve the existing shared ASVP index when the `asvp/` directory is empty after a consumed import
+  - warn on rollback cleanup problems without overwriting the original import failure
+- Updated the runbook in `RUN.md` with the new ASVP import behavior and environment knobs:
+  - `ASVP_PRE_SPLIT_MIN_BYTES`
+  - `ASVP_SPLIT_ROWS_PER_FILE`
+  - `ASVP_DELETE_IMPORTED_FILES`
+- Updated `CLAUDE.md` to record that `storage/registry-index.db` is a shared, non-tenant-scoped cache and that ASVP snapshots are now consumed after successful import
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts` -> PASS (4/4)
+  - `npm run build` -> PASS
+
+## 2026-03-20 Day-One Scope Decision And Staging Prep
+
+- Added a concrete scope-cut document for the current next phase:
+  - `docs/DAY_ONE_SCOPE_AND_STAGING_PREP.md`
+- Added a dedicated staging env template instead of relying on the broader `.env.example`:
+  - `.env.staging.example`
+- Recorded the recommended reduced day-one scope as:
+  - in scope:
+    - core CRM modules
+    - local auth/session/2FA
+    - PostgreSQL + Redis + dedicated worker split
+    - file storage, malware scanning, PDF/OCR runtime
+    - in-app notifications
+    - SMTP-backed transactional email for essential flows
+  - out of scope for the recommended first launch wave:
+    - ACSK / Diia / BankID NBU live rollout
+    - Stripe / WayForPay self-serve public billing
+    - SMS
+    - push
+    - Google / Apple / Microsoft auth
+- Updated operating docs to point at the new staging pack:
+  - `RUN.md`
+  - `docs/LAUNCH_READINESS_MASTER_CHECKLIST.md`
+  - `docs/DEPLOYMENT.md`
+- Why this cut was chosen:
+  - it reduces the number of external-provider blockers for the first staging pass
+  - it keeps the staging target aligned with what is already green locally
+  - it still preserves the real production-like topology that matters for hardening:
+    - PostgreSQL
+    - Redis
+    - dedicated worker
+    - object storage
+    - malware scanning
+    - PDF/OCR runtime
+- Important truth boundary:
+  - this session did not prove staging readiness
+  - it only turned scope decision and staging preparation into explicit repo artifacts
+- Verification run in this session:
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+    - Vite still reports the existing circular/manual-chunk and large-chunk warnings
+
+## 2026-03-19 Launch Readiness Status Refresh
+
+- Current launch conclusion after re-checking the repo on 2026-03-19:
+  - local code verification is green
+  - the project remains `pre-production`, not full-launch ready
+  - the main remaining blockers are external/provider/ops/runtime/staging tasks rather than missing core code
+- Verification run in this session:
+  - `npm run lint` -> PASS after fixing a minor regex lint regression in:
+    - `src/clients/services/court-registry.service.ts`
+    - `src/registry-index/services/registry-index.service.ts`
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS (Vite chunk warnings remain)
+  - `npm test -- --runInBand` -> PASS (32 passed suites, 1 skipped / 176 passed tests, 3 skipped)
+  - `npm run test:e2e -- --runInBand` -> PASS (22/22)
+  - `npm run test:frontend:smoke` -> PASS (3/3)
+  - `npm test -- --runInBand src/clients/services/court-registry.service.spec.ts src/registry-index/services/registry-index.service.spec.ts` -> PASS (10/10)
+  - `which tesseract ocrmypdf unpaper clamscan clamdscan python3` -> PARTIAL (`tesseract`, `ocrmypdf`, `unpaper`, `python3` present; `clamscan`/`clamdscan` missing)
+  - `python3 -c "import importlib.util; print(importlib.util.find_spec('cv2') is not None)"` -> FAIL (default host `python3` lacks `cv2`)
+  - `./.venv-pdf/bin/python -c "import numpy, cv2; from PIL import Image; print('venv_pdf_ready')"` -> PASS
+- Current launch blockers after this refresh:
+  - real ACSK / Diia / BankID contracts, credentials, callback approvals, and staging proof
+  - real Stripe / WayForPay launch credentials and webhook proof if paid launch is in scope
+  - real outbound email / SMS / push provider delivery proof
+  - production host provisioning for ClamAV plus OCR/PDF runtime parity
+  - staging/operator rehearsal for deploy, degrade, backup/restore, and provider flows
+  - production domain / DNS / TLS / S3 / monitoring / legal / support ownership
+- Scope clarification confirmed again:
+  - Google / Apple / Microsoft auth is still not required for the current main launch path
+- Docs updated in this session to reflect the new truth:
+  - `CLAUDE.md`
+  - `docs/LAUNCH_READINESS_MASTER_CHECKLIST.md`
+  - `docs/PRODUCTION_READINESS_REPORT.md`
+
+## 2026-03-19 Documentation Reconciliation
+
+- Replaced the root-level operating docs with a minimal, current truth hierarchy:
+  - `AGENTS.md` is now the primary Codex operating contract
+  - `RUN.md` is now the current runbook
+  - `CLAUDE.md` is now a compact secondary context file instead of a mixed diary
+- Re-scoped root historical artifacts so they no longer present themselves as current truth:
+  - `AUDIT_QUICK_REFERENCE.md`
+  - `NESTJS_BACKEND_AUDIT_REPORT.md`
+  - `API_EXAMPLES.md`
+- Restored the missing migration helper entrypoints referenced by `package.json`:
+  - `src/migrations/data-source.ts`
+  - `src/migrations/run.ts`
+  - `src/migrations/generate.ts`
+- Added three repo-specific Codex skills for recurring local workflows:
+  - `.codex/skills/project-audit/SKILL.md`
+  - `.codex/skills/fix-and-verify/SKILL.md`
+  - `.codex/skills/run-and-validate/SKILL.md`
+- Current truth clarified by this pass:
+  - the worker is real (`src/worker.ts`) but is DB-polling/scheduled, not BullMQ
+  - PostgreSQL RLS is migration-based and real in code, not an `ENABLE_RLS` env toggle
+  - fast local mode is SQLite-first and does not prove PostgreSQL-only behavior
+  - the checked-in `nginx-proxy` path is incomplete because `nginx.prod.conf` and `ssl/` are absent from the repo
+- Verification run in this session:
+  - `npm run build` -> PASS
+  - `npx eslint src/migrations/*.ts` -> PASS
+  - `ls dist/migrations` -> PASS (`data-source.js`, `generate.js`, `run.js` present)
+- Residual risk:
+  - the restored migration runner now exists and compiles, but no real PostgreSQL migration execution was performed in this session
+  - Docker/Kubernetes startup paths were audited against files and scripts, not fully re-executed in this pass
 
 ## Current Health
 
@@ -3915,3 +4215,72 @@
 
 ## Risks / Guardrails
 - The document viewer route still lacks automated browser/runtime coverage for "open existing PDF and render sidebar"; if this page changes again, add a focused smoke test instead of relying only on build success
+
+### 2026-03-20 Court Dates Prompting From Case Creation / Login / Case Card
+
+## Current Snapshot
+- After creating a judicial case, the case card now checks `court_dates` for the nearest hearing and offers to create an event from the registry data.
+- After the first authenticated app entry on or after `10:00` in `Europe/Kyiv`, the main layout now checks assigned judicial cases for pending `court_dates` hearing suggestions and shows a top-level notification with a "create event" action.
+- The case card now also exposes a manual registry-hearing search action for rerunning the lookup on demand.
+
+## Technical State
+- Updated backend registry lookup flow:
+  - `src/clients/services/court-registry.service.ts`
+    - added `searchCourtDates(...)` for `court_dates` matching by case number and/or participant query
+  - `src/cases/services/case-registry-sync.service.ts`
+    - added nearest-hearing suggestion resolution
+    - added manual event creation reusing the same `court_dates` event payload/upsert path
+  - `src/cases/services/case.service.ts`
+    - added case-level suggestion retrieval
+    - added per-user pending hearing notification retrieval
+    - added explicit event creation from a suggested hearing
+  - `src/cases/controllers/cases.controller.ts`
+    - added:
+      - `GET /cases/registry-hearing-notifications`
+      - `GET /cases/:id/registry-hearing-suggestion`
+      - `POST /cases/:id/registry-hearing-event`
+- Updated frontend surfaces:
+  - `src/frontend/components/RegistryHearingNotifications.tsx`
+  - `src/frontend/App.tsx`
+  - `src/frontend/App.css`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/services/case.service.ts`
+  - `src/frontend/types/case.types.ts`
+- Matching behavior:
+  - prefers `registryCaseNumber`
+  - falls back to client/participant FIO search when needed
+  - suppresses prompts when a linked `court_sitting` event already exists for the suggested hearing
+
+## Validation Status
+- `npm test -- --runInBand src/clients/services/court-registry.service.spec.ts src/cases/services/case-registry-sync.service.spec.ts` -> PASS (13/13)
+- `npm run build` -> PASS
+- `npm run build:frontend` -> PASS
+
+## Risks / Guardrails
+- The daily login-side check is intentionally front-end scheduled via local browser storage, so it is per-user-per-browser rather than server-enforced.
+- The "after 10 hours in Europe" rule is implemented as after `10:00` in `Europe/Kyiv`; if you want another timezone, this should be changed explicitly.
+- FIO-based fallback lookup is conservative and still requires user confirmation before event creation, because names in the registry can be ambiguous.
+
+### 2026-03-21 Court Dates Indexed Lookup Fix
+
+## Current Snapshot
+- Registry hearing suggestions no longer depend on raw `court_dates/*.csv` files remaining on disk after import.
+- The nearest-hearing flow now works in the real indexed setup where `court_dates` has already been moved into `storage/registry-index.db`.
+
+## Technical State
+- Updated `src/clients/services/court-registry.service.ts` so:
+  - `findCourtDatesByCaseNumbers(...)` now uses the internal registry index when `court_dates` is available there
+  - `searchCourtDates(...)` now prefers indexed resolution for FIO-based searches by:
+    - finding matching case numbers in indexed court registry data
+    - resolving hearing dates from indexed `court_dates`
+  - CSV scanning remains only as a fallback when the relevant index is unavailable
+- Extended `src/clients/services/court-registry.service.spec.ts` with explicit coverage for:
+  - indexed lookup when `court_dates` CSV files are absent
+
+## Validation Status
+- `npm test -- --runInBand src/clients/services/court-registry.service.spec.ts src/cases/services/case-registry-sync.service.spec.ts` -> PASS (14/14)
+- `npm run build` -> PASS
+- `npm run build:frontend` -> PASS
+
+## Risks / Guardrails
+- FIO-driven indexed lookup still depends on the court-registry participant index to produce case numbers first; if a participant is missing or malformed there, the suggestion can still be missed even when a `court_dates` row exists.

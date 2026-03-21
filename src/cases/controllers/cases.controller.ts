@@ -94,20 +94,64 @@ export class CasesController {
   @ApiOperation({
     summary: "Search court and enforcement registries for cases",
   })
-  @ApiQuery({ name: "query", required: true, type: String })
+  @ApiQuery({ name: "query", required: false, type: String })
   @ApiQuery({ name: "dateFrom", required: false, type: String })
   @ApiQuery({ name: "dateTo", required: false, type: String })
+  @ApiQuery({ name: "source", required: false, type: String })
+  @ApiQuery({ name: "caseNumber", required: false, type: String })
+  @ApiQuery({ name: "institutionName", required: false, type: String })
+  @ApiQuery({ name: "role", required: false, type: String })
+  @ApiQuery({ name: "status", required: false, type: String })
+  @ApiQuery({ name: "judge", required: false, type: String })
+  @ApiQuery({ name: "proceedingNumber", required: false, type: String })
+  @ApiQuery({ name: "proceedingType", required: false, type: String })
   @ApiResponse({ status: 200, description: "Registry search results returned" })
   async searchRegistries(
-    @Query("query") query: string,
+    @Query("query") query?: string,
     @Query("dateFrom") dateFrom?: string,
     @Query("dateTo") dateTo?: string,
+    @Query("source") source?: "court_registry" | "asvp",
+    @Query("caseNumber") caseNumber?: string,
+    @Query("institutionName") institutionName?: string,
+    @Query("role") role?: string,
+    @Query("status") status?: string,
+    @Query("judge") judge?: string,
+    @Query("proceedingNumber") proceedingNumber?: string,
+    @Query("proceedingType") proceedingType?: string,
   ): Promise<CourtRegistrySearchResult[]> {
     return this.courtRegistryService.searchInCaseRegistries({
       query,
       dateFrom,
       dateTo,
+      source,
+      caseNumber,
+      institutionName,
+      role,
+      status,
+      judge,
+      proceedingNumber,
+      proceedingType,
     });
+  }
+
+  @Get("registry-hearing-notifications")
+  @ApiOperation({
+    summary:
+      "Get case hearing suggestions from court_dates for the current user",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Registry hearing suggestions returned",
+  })
+  async getRegistryHearingNotifications(@Req() req: any): Promise<any[]> {
+    const tenantId = req.user?.tenant_id;
+    const userId = req.user?.user_id;
+
+    return this.caseService.getRegistryHearingNotifications(
+      tenantId,
+      userId,
+      req.user,
+    );
   }
 
   @Get(":id")
@@ -124,6 +168,54 @@ export class CasesController {
   async getTimeline(@Param("id") id: string, @Req() req: any): Promise<any> {
     const tenantId = req.user?.tenant_id;
     return this.caseService.getTimeline(tenantId, id, req.user);
+  }
+
+  @Get(":id/registry-hearing-suggestion")
+  @ApiOperation({
+    summary: "Get the nearest court_dates hearing suggestion for a case",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Registry hearing suggestion returned",
+  })
+  async getRegistryHearingSuggestion(
+    @Param("id") id: string,
+    @Req() req: any,
+  ): Promise<any> {
+    const tenantId = req.user?.tenant_id;
+    return this.caseService.getRegistryHearingSuggestion(
+      tenantId,
+      id,
+      req.user,
+    );
+  }
+
+  @Post(":id/registry-hearing-event")
+  @UseGuards(RbacGuard)
+  @Roles(
+    UserRole.ORGANIZATION_OWNER,
+    UserRole.ORGANIZATION_ADMIN,
+    UserRole.LAWYER,
+    UserRole.ASSISTANT,
+  )
+  @ApiOperation({
+    summary:
+      "Create a case event from the nearest court_dates hearing suggestion",
+  })
+  @ApiResponse({ status: 201, description: "Registry hearing event created" })
+  async createRegistryHearingEvent(
+    @Param("id") id: string,
+    @Req() req: any,
+  ): Promise<any> {
+    const tenantId = req.user?.tenant_id;
+    const userId = req.user?.user_id;
+
+    return this.caseService.createRegistryHearingEvent(
+      tenantId,
+      id,
+      userId,
+      req.user,
+    );
   }
 
   @Post()

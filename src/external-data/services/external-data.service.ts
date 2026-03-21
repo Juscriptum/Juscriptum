@@ -1,9 +1,4 @@
-import {
-  Inject,
-  Injectable,
-  Logger,
-  Optional,
-} from "@nestjs/common";
+import { Inject, Injectable, Logger, Optional } from "@nestjs/common";
 import axios from "axios";
 import * as crypto from "crypto";
 import { spawn } from "child_process";
@@ -71,12 +66,20 @@ export class ExternalDataService {
     options: ExternalDataUpdateOptions = {},
   ): Promise<void> {
     const sources = options.source
-      ? this.definitions.filter((definition) => definition.code === options.source)
+      ? this.definitions.filter(
+          (definition) => definition.code === options.source,
+        )
       : this.definitions;
 
     for (const source of sources) {
       await this.updateSource(source, options);
     }
+  }
+
+  hasConfiguredSources(): boolean {
+    return this.definitions.some(
+      (definition) => definition.resources.length > 0,
+    );
   }
 
   private async updateSource(
@@ -98,7 +101,10 @@ export class ExternalDataService {
       source.code,
     );
 
-    if (!options.force && currentState?.remote_fingerprint === remoteFingerprint) {
+    if (
+      !options.force &&
+      currentState?.remote_fingerprint === remoteFingerprint
+    ) {
       this.logger.log(`Skipping ${source.code}: remote metadata unchanged`);
       return;
     }
@@ -123,15 +129,22 @@ export class ExternalDataService {
       const downloadedFiles: string[] = [];
 
       for (const resource of source.resources) {
-        const downloaded = await this.downloadResource(resource, downloadDirectory);
+        const downloaded = await this.downloadResource(
+          resource,
+          downloadDirectory,
+        );
         downloadedFiles.push(downloaded);
         await this.materializeDownloadedResource(downloaded, preparedDirectory);
       }
 
-      await this.ensurePreparedDirectoryHasFiles(preparedDirectory, source.code);
+      await this.ensurePreparedDirectoryHasFiles(
+        preparedDirectory,
+        source.code,
+      );
 
       const downloadedHash = await this.computeFileSetHash(downloadedFiles);
-      const extractedHash = await this.computeDirectoryContentHash(preparedDirectory);
+      const extractedHash =
+        await this.computeDirectoryContentHash(preparedDirectory);
       const downloadedAt = new Date().toISOString();
 
       if (
@@ -142,7 +155,9 @@ export class ExternalDataService {
         this.logger.log(`Skipping ${source.code}: extracted content unchanged`);
         await this.registryIndexService.upsertImportState(source.code, {
           dataset_url: source.datasetUrl || null,
-          resource_name: JSON.stringify(remoteResources.map((item) => item.name)),
+          resource_name: JSON.stringify(
+            remoteResources.map((item) => item.name),
+          ),
           resource_url: JSON.stringify(remoteResources.map((item) => item.url)),
           remote_updated_at: this.computeLatestRemoteUpdatedAt(remoteResources),
           remote_fingerprint: remoteFingerprint,
@@ -156,7 +171,10 @@ export class ExternalDataService {
         return;
       }
 
-      await this.replaceTargetDirectory(source.targetDirectory, preparedDirectory);
+      await this.replaceTargetDirectory(
+        source.targetDirectory,
+        preparedDirectory,
+      );
 
       await this.registryIndexService.upsertImportState(source.code, {
         dataset_url: source.datasetUrl || null,
@@ -185,7 +203,9 @@ export class ExternalDataService {
       const message = error instanceof Error ? error.message : String(error);
       await this.registryIndexService.upsertImportState(source.code, {
         dataset_url: source.datasetUrl || null,
-        resource_name: JSON.stringify(source.resources.map((item) => item.name)),
+        resource_name: JSON.stringify(
+          source.resources.map((item) => item.name),
+        ),
         resource_url: JSON.stringify(source.resources.map((item) => item.url)),
         remote_fingerprint: remoteFingerprint,
         last_status: "failed",
@@ -193,7 +213,9 @@ export class ExternalDataService {
       });
       throw error;
     } finally {
-      await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined);
+      await rm(tempRoot, { recursive: true, force: true }).catch(
+        () => undefined,
+      );
     }
   }
 
@@ -281,7 +303,9 @@ export class ExternalDataService {
     throw new Error(`Unreachable download retry loop for ${resource.url}`);
   }
 
-  private buildDownloadFileName(resource: ExternalDataResourceDefinition): string {
+  private buildDownloadFileName(
+    resource: ExternalDataResourceDefinition,
+  ): string {
     const parsedUrl = new URL(resource.url);
     const baseName = path.basename(parsedUrl.pathname) || resource.name;
     return `${resource.name}-${baseName}`;
@@ -296,7 +320,9 @@ export class ExternalDataService {
       return;
     }
 
-    const fileName = this.normalizeExtractedFileName(path.basename(downloadedPath));
+    const fileName = this.normalizeExtractedFileName(
+      path.basename(downloadedPath),
+    );
     await copyFile(downloadedPath, path.join(preparedDirectory, fileName));
   }
 
@@ -309,7 +335,12 @@ export class ExternalDataService {
     targetDirectory: string,
   ): Promise<void> {
     try {
-      await this.execCommand("unzip", ["-o", archivePath, "-d", targetDirectory]);
+      await this.execCommand("unzip", [
+        "-o",
+        archivePath,
+        "-d",
+        targetDirectory,
+      ]);
       return;
     } catch {
       const archiveBuffer = await readFile(archivePath);
@@ -317,7 +348,9 @@ export class ExternalDataService {
 
       for (const [entryName, content] of Object.entries(files)) {
         if (entryName.endsWith("/")) {
-          await mkdir(path.join(targetDirectory, entryName), { recursive: true });
+          await mkdir(path.join(targetDirectory, entryName), {
+            recursive: true,
+          });
           continue;
         }
 
@@ -391,7 +424,9 @@ export class ExternalDataService {
     return hash.digest("hex");
   }
 
-  private async computeDirectoryContentHash(directory: string): Promise<string> {
+  private async computeDirectoryContentHash(
+    directory: string,
+  ): Promise<string> {
     const hash = crypto.createHash("sha256");
     const files = await this.listFilesRecursively(directory);
 
@@ -438,9 +473,7 @@ export class ExternalDataService {
       });
       const stderrChunks: Buffer[] = [];
 
-      child.stderr.on("data", (chunk) =>
-        stderrChunks.push(Buffer.from(chunk)),
-      );
+      child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
       child.on("error", reject);
       child.on("close", (code) => {
         if (code === 0) {

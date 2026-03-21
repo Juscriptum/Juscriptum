@@ -12,6 +12,7 @@ import { I18nProvider } from "./i18n";
 import { useAuth } from "./hooks/useAuth";
 import { useOnboarding } from "./hooks/useOnboarding";
 import { AuthSessionSync } from "./components/AuthSessionSync";
+import { RegistryHearingNotifications } from "./components/RegistryHearingNotifications";
 import {
   SidebarNavigation,
   TopNavigation,
@@ -362,6 +363,7 @@ const MainLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
       <div className="main-content">
         <TopNavigation isSidebarCollapsed={isSidebarCollapsed} />
         <main className="page-content" id="main-content">
+          <RegistryHearingNotifications />
           {children}
         </main>
       </div>

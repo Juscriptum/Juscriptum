@@ -2,11 +2,17 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import * as crypto from "crypto";
 import Database = require("better-sqlite3");
 import { createReadStream } from "fs";
-import { mkdir, readdir, stat } from "fs/promises";
+import { mkdir, readdir, rm, stat } from "fs/promises";
 import * as iconv from "iconv-lite";
 import * as path from "path";
 import * as readline from "readline";
 import { Transform } from "stream";
+import {
+  cleanupPreparedSourceImportPlan,
+  finalizePreparedSourceImportPlan,
+  prepareSourceImportPlan,
+  shouldDeleteImportedSourceFiles,
+} from "./registry-source-import-preparation";
 import {
   ASVP_SOURCE_LABEL,
   COURT_REGISTRY_SOURCE_LABEL,
@@ -98,6 +104,8 @@ export class RegistryIndexService implements OnModuleDestroy {
   private readonly asvpDirectory: string;
   private readonly courtDatesDirectory: string;
   private readonly batchSize: number;
+  private readonly deleteImportedSourceFiles: Record<ImportSourceCode, boolean>;
+  private readonly sourceRebuilds = new Map<ImportSourceCode, Promise<void>>();
   private db: SqliteDatabase | null = null;
 
   constructor(@Optional() dbPath?: string) {
@@ -107,6 +115,11 @@ export class RegistryIndexService implements OnModuleDestroy {
     this.asvpDirectory = path.resolve(process.cwd(), "asvp");
     this.courtDatesDirectory = path.resolve(process.cwd(), "court_dates");
     this.batchSize = Number(process.env.REGISTRY_INDEX_BATCH_SIZE || "1000");
+    this.deleteImportedSourceFiles = {
+      court_stan: shouldDeleteImportedSourceFiles("court_stan"),
+      asvp: shouldDeleteImportedSourceFiles("asvp"),
+      court_dates: shouldDeleteImportedSourceFiles("court_dates"),
+    };
   }
 
   onModuleDestroy(): void {
@@ -177,7 +190,6 @@ export class RegistryIndexService implements OnModuleDestroy {
         phone_num TEXT,
         email_addr TEXT,
         bank_account TEXT,
-        raw_row_json TEXT NULL,
         source_file TEXT,
         source_row_num INTEGER NULL,
         import_batch_id TEXT,
@@ -215,7 +227,6 @@ export class RegistryIndexService implements OnModuleDestroy {
         court_room TEXT,
         case_involved TEXT,
         case_description TEXT,
-        raw_row_json TEXT NULL,
         source_file TEXT,
         source_row_num INTEGER NULL,
         import_batch_id TEXT,
@@ -257,9 +268,9 @@ export class RegistryIndexService implements OnModuleDestroy {
       );
     `);
     const importStateColumns = (
-      database
-        .prepare(`PRAGMA table_info(import_state)`)
-        .all() as Array<{ name?: string }>
+      database.prepare(`PRAGMA table_info(import_state)`).all() as Array<{
+        name?: string;
+      }>
     )
       .map((row) => row.name)
       .filter((value): value is string => Boolean(value));
@@ -270,6 +281,7 @@ export class RegistryIndexService implements OnModuleDestroy {
       );
     }
 
+    await this.migrateLegacyRegistrySchema(database);
     this.db = database;
   }
 
@@ -376,8 +388,12 @@ export class RegistryIndexService implements OnModuleDestroy {
       : ["court_stan", "asvp", "court_dates"];
 
     for (const source of sources) {
-      await this.rebuildSource(source, options?.force || false);
+      await this.runSourceRebuildSerialized(source, () =>
+        this.rebuildSource(source, options?.force || false),
+      );
     }
+
+    this.compactWriteAheadLogIfPossible();
   }
 
   async searchCourtRegistry(
@@ -389,48 +405,18 @@ export class RegistryIndexService implements OnModuleDestroy {
       return [];
     }
 
-    const normalizedQuery = this.normalizeSearchValue(options.query);
-
-    if (!normalizedQuery) {
-      return [];
-    }
-
-    const matchQuery = this.buildFtsQuery(normalizedQuery);
-    const rows = this.getDb()
-      .prepare(
-        `
-        SELECT
-          p.case_number,
-          p.participant_raw,
-          p.participant_role,
-          p.court_name,
-          p.case_proc,
-          p.registration_date,
-          p.judge,
-          p.stage_date,
-          p.stage_name,
-          p.record_type,
-          p.case_description,
-          p.participants
-        FROM court_registry_participants_fts f
-        JOIN court_registry_participants p ON p.id = f.rowid
-        WHERE court_registry_participants_fts MATCH ?
-        LIMIT 200
-        `,
-      )
-      .all(matchQuery) as Array<Record<string, string>>;
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
+    const rows = this.queryCourtRegistryRows(options, normalizedQuery);
 
     return rows
       .filter((row) =>
-        this.normalizeSearchValue(row.participant_raw || "").includes(
-          normalizedQuery,
-        ),
+        this.matchesCourtRowFilters(row, options, normalizedQuery),
       )
       .filter((row) =>
         this.matchesDateRange(row.registration_date || "", options),
       )
       .map((row) => ({
-        source: "court_registry",
+        source: "court_registry" as const,
         sourceLabel: COURT_REGISTRY_SOURCE_LABEL,
         person: row.participant_raw || "",
         role: row.participant_role || "",
@@ -444,7 +430,11 @@ export class RegistryIndexService implements OnModuleDestroy {
         stageDate: row.stage_date || "",
         stageName: row.stage_name || "",
         participants: row.participants || "",
-      }));
+      }))
+      .slice(0, 200)
+      .sort((left, right) =>
+        this.compareSearchResults(left.person, right.person, normalizedQuery),
+      );
   }
 
   async searchAsvpRegistry(
@@ -456,25 +446,8 @@ export class RegistryIndexService implements OnModuleDestroy {
       return [];
     }
 
-    const normalizedQuery = this.normalizeSearchValue(options.query);
-
-    if (!normalizedQuery) {
-      return [];
-    }
-
-    const matchQuery = this.buildFtsQuery(normalizedQuery);
-    const rows = this.getDb()
-      .prepare(
-        `
-        SELECT
-          a.*
-        FROM asvp_records_fts f
-        JOIN asvp_records a ON a.id = f.rowid
-        WHERE asvp_records_fts MATCH ?
-        LIMIT 200
-        `,
-      )
-      .all(matchQuery) as Array<Record<string, string>>;
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
+    const rows = this.queryAsvpRows(options, normalizedQuery);
 
     const results: CourtRegistrySearchResult[] = [];
 
@@ -483,12 +456,16 @@ export class RegistryIndexService implements OnModuleDestroy {
         this.matchesDateRange(row.vp_begindate || "", options, true),
       )
       .forEach((row) => {
-        const debtorMatches = this.normalizeSearchValue(
-          row.debtor_name || "",
-        ).includes(normalizedQuery);
-        const creditorMatches = this.normalizeSearchValue(
-          row.creditor_name || "",
-        ).includes(normalizedQuery);
+        const debtorMatches =
+          this.matchesSearchQuery(
+            this.normalizeSearchValue(row.debtor_name || ""),
+            normalizedQuery,
+          ) && this.matchesAsvpRowFilters(row, options, "Боржник");
+        const creditorMatches =
+          this.matchesSearchQuery(
+            this.normalizeSearchValue(row.creditor_name || ""),
+            normalizedQuery,
+          ) && this.matchesAsvpRowFilters(row, options, "Стягувач");
 
         if (debtorMatches) {
           results.push({
@@ -541,7 +518,11 @@ export class RegistryIndexService implements OnModuleDestroy {
         }
       });
 
-    return results;
+    return results
+      .slice(0, 200)
+      .sort((left, right) =>
+        this.compareSearchResults(left.person, right.person, normalizedQuery),
+      );
   }
 
   async findCourtDateByCaseNumber(
@@ -593,14 +574,42 @@ export class RegistryIndexService implements OnModuleDestroy {
     force: boolean,
   ): Promise<void> {
     const files = await this.listSourceFiles(source);
-    const signature = await this.computeDirectorySignature(files);
     const currentState = this.getDb()
       .prepare(
-        `SELECT extracted_hash FROM import_state WHERE source_code = ? LIMIT 1`,
+        `
+        SELECT extracted_hash, last_status, rows_imported
+        FROM import_state
+        WHERE source_code = ?
+        LIMIT 1
+        `,
       )
-      .get(source) as { extracted_hash?: string } | undefined;
+      .get(source) as
+      | {
+          extracted_hash?: string;
+          last_status?: string;
+          rows_imported?: number;
+        }
+      | undefined;
+
+    if (files.length === 0) {
+      if (
+        currentState?.last_status === "success" &&
+        (currentState.rows_imported || 0) > 0
+      ) {
+        this.logger.log(
+          `Skipping ${source} index rebuild: no source files found, keeping existing shared index`,
+        );
+        return;
+      }
+
+      this.logger.log(`Skipping ${source} index rebuild: no CSV files found`);
+      return;
+    }
+
+    const signature = await this.computeDirectorySignature(files);
 
     if (!force && currentState?.extracted_hash === signature) {
+      await this.cleanupUnchangedSourceFiles(source, files, currentState);
       this.logger.log(
         `Skipping ${source} index rebuild: source files unchanged`,
       );
@@ -707,10 +716,12 @@ export class RegistryIndexService implements OnModuleDestroy {
     files: string[],
     batchId: string,
   ): Promise<number> {
+    const importPlan = await prepareSourceImportPlan("court_stan", files);
     const db = this.getDb();
-    db.exec("BEGIN IMMEDIATE");
+    let rowsImported = 0;
 
     try {
+      db.exec("BEGIN IMMEDIATE");
       db.prepare(`DELETE FROM court_registry_participants_fts`).run();
       db.prepare(`DELETE FROM court_registry_participants`).run();
       const insertRow = db.prepare(
@@ -748,17 +759,16 @@ export class RegistryIndexService implements OnModuleDestroy {
       );
 
       let rowId = 0;
-      let rowsImported = 0;
       const now = new Date().toISOString();
 
-      for (const filePath of files) {
+      for (const preparedFile of importPlan.files) {
         let sourceRowNum = 0;
 
         for await (const row of this.readDelimitedRows<CourtRegistryRow>(
-          filePath,
+          preparedFile.filePath,
           {
             delimiter: "\t",
-            encoding: "utf-8",
+            encoding: preparedFile.encoding,
           },
         )) {
           sourceRowNum += 1;
@@ -783,7 +793,7 @@ export class RegistryIndexService implements OnModuleDestroy {
               row.type || "",
               row.description || "",
               row.participants || "",
-              path.basename(filePath),
+              preparedFile.sourceFileName,
               sourceRowNum,
               batchId,
               now,
@@ -800,129 +810,161 @@ export class RegistryIndexService implements OnModuleDestroy {
       }
 
       db.exec("COMMIT");
-      return rowsImported;
     } catch (error) {
-      db.exec("ROLLBACK");
+      this.rollbackTransaction(db, "court_stan rebuild");
+      await cleanupPreparedSourceImportPlan(importPlan).catch(() => undefined);
       throw error;
     }
+
+    await this.finalizeConsumedSourceImport("court_stan", importPlan);
+    return rowsImported;
   }
 
   private async rebuildAsvp(files: string[], batchId: string): Promise<number> {
+    const importPlan = await prepareSourceImportPlan("asvp", files);
     const db = this.getDb();
-    db.exec("BEGIN IMMEDIATE");
+    let rowsImported = 0;
+    const now = new Date().toISOString();
+
+    const insertRow = db.prepare(
+      `
+      INSERT INTO asvp_records (
+        vp_ordernum,
+        debtor_name,
+        debtor_name_normalized,
+        creditor_name,
+        creditor_name_normalized,
+        org_name,
+        org_name_normalized,
+        vp_begindate,
+        vp_state,
+        dvs_code,
+        phone_num,
+        email_addr,
+        bank_account,
+        source_file,
+        source_row_num,
+        import_batch_id,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
+    const insertFts = db.prepare(
+      `
+      INSERT INTO asvp_records_fts (
+        rowid,
+        debtor_name,
+        debtor_name_normalized,
+        creditor_name,
+        creditor_name_normalized,
+        org_name,
+        org_name_normalized
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `,
+    );
 
     try {
+      db.exec("BEGIN IMMEDIATE");
       db.prepare(`DELETE FROM asvp_records_fts`).run();
       db.prepare(`DELETE FROM asvp_records`).run();
-      const insertRow = db.prepare(
-        `
-        INSERT INTO asvp_records (
-          vp_ordernum,
-          debtor_name,
-          debtor_name_normalized,
-          creditor_name,
-          creditor_name_normalized,
-          org_name,
-          org_name_normalized,
-          vp_begindate,
-          vp_state,
-          dvs_code,
-          phone_num,
-          email_addr,
-          bank_account,
-          raw_row_json,
-          source_file,
-          source_row_num,
-          import_batch_id,
-          created_at,
-          updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `,
-      );
-      const insertFts = db.prepare(
-        `
-        INSERT INTO asvp_records_fts (
-          rowid,
-          debtor_name,
-          debtor_name_normalized,
-          creditor_name,
-          creditor_name_normalized,
-          org_name,
-          org_name_normalized
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
-        `,
-      );
+      db.exec("COMMIT");
 
       let rowId = 0;
-      let rowsImported = 0;
-      const now = new Date().toISOString();
 
-      for (const filePath of files) {
+      for (const preparedFile of importPlan.files) {
         let sourceRowNum = 0;
+        let fileRowsImported = 0;
 
-        for await (const row of this.readDelimitedRows<AsvpRegistryRow>(
-          filePath,
-          {
-            delimiter: ",",
-            encoding: "asvp-repaired",
-          },
-        )) {
-          sourceRowNum += 1;
-          rowId += 1;
-          const debtorName = (row.DEBTOR_NAME || "").trim();
-          const creditorName = (row.CREDITOR_NAME || "").trim();
-          const orgName = (row.ORG_NAME || "").trim();
+        db.exec("BEGIN IMMEDIATE");
 
-          insertRow.run(
-            row.VP_ORDERNUM || "",
-            debtorName,
-            this.normalizeSearchValue(debtorName),
-            creditorName,
-            this.normalizeSearchValue(creditorName),
-            orgName,
-            this.normalizeSearchValue(orgName),
-            row.VP_BEGINDATE || "",
-            row.VP_STATE || "",
-            row.DVS_CODE || "",
-            row.PHONE_NUM || "",
-            row.EMAIL_ADDR || "",
-            row.BANK_ACCOUNT || "",
-            JSON.stringify(row),
-            path.basename(filePath),
-            sourceRowNum,
-            batchId,
-            now,
-            now,
-          );
-          insertFts.run(
-            rowId,
-            debtorName,
-            this.normalizeSearchValue(debtorName),
-            creditorName,
-            this.normalizeSearchValue(creditorName),
-            orgName,
-            this.normalizeSearchValue(orgName),
-          );
-          rowsImported += 1;
+        try {
+          for await (const row of this.readDelimitedRows<AsvpRegistryRow>(
+            preparedFile.filePath,
+            {
+              delimiter: ",",
+              encoding: preparedFile.encoding,
+            },
+          )) {
+            sourceRowNum += 1;
+            rowId += 1;
+            const debtorName = (row.DEBTOR_NAME || "").trim();
+            const creditorName = (row.CREDITOR_NAME || "").trim();
+            const orgName = (row.ORG_NAME || "").trim();
+
+            insertRow.run(
+              row.VP_ORDERNUM || "",
+              debtorName,
+              this.normalizeSearchValue(debtorName),
+              creditorName,
+              this.normalizeSearchValue(creditorName),
+              orgName,
+              this.normalizeSearchValue(orgName),
+              row.VP_BEGINDATE || "",
+              row.VP_STATE || "",
+              row.DVS_CODE || "",
+              row.PHONE_NUM || "",
+              row.EMAIL_ADDR || "",
+              row.BANK_ACCOUNT || "",
+              preparedFile.sourceFileName,
+              sourceRowNum,
+              batchId,
+              now,
+              now,
+            );
+            insertFts.run(
+              rowId,
+              debtorName,
+              this.normalizeSearchValue(debtorName),
+              creditorName,
+              this.normalizeSearchValue(creditorName),
+              orgName,
+              this.normalizeSearchValue(orgName),
+            );
+            fileRowsImported += 1;
+          }
+
+          db.exec("COMMIT");
+        } catch (error) {
+          this.rollbackTransaction(db, "asvp chunk rebuild");
+          throw error;
         }
-      }
 
-      db.exec("COMMIT");
-      return rowsImported;
+        rowsImported += fileRowsImported;
+        this.getDb()
+          .prepare(
+            `
+            UPDATE import_batches
+            SET rows_processed = ?
+            WHERE id = ?
+            `,
+          )
+          .run(rowsImported, batchId);
+
+        this.logger.log(
+          `Imported ${fileRowsImported} ASVP rows from ${path.basename(preparedFile.filePath)} (${rowsImported} total)`,
+        );
+      }
     } catch (error) {
-      db.exec("ROLLBACK");
+      this.rollbackTransaction(db, "asvp rebuild");
+      await cleanupPreparedSourceImportPlan(importPlan).catch(() => undefined);
       throw error;
     }
+
+    await this.finalizeConsumedSourceImport("asvp", importPlan);
+    return rowsImported;
   }
 
   private async rebuildCourtDates(
     files: string[],
     batchId: string,
   ): Promise<number> {
+    const importPlan = await prepareSourceImportPlan("court_dates", files);
     const db = this.getDb();
-    db.exec("BEGIN IMMEDIATE");
+    let rowsImported = 0;
 
     try {
+      db.exec("BEGIN IMMEDIATE");
       db.prepare(`DELETE FROM court_dates`).run();
       const insertRow = db.prepare(
         `
@@ -935,26 +977,27 @@ export class RegistryIndexService implements OnModuleDestroy {
           court_room,
           case_involved,
           case_description,
-          raw_row_json,
           source_file,
           source_row_num,
           import_batch_id,
           created_at,
           updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       );
 
-      let rowsImported = 0;
       const now = new Date().toISOString();
 
-      for (const filePath of files) {
+      for (const preparedFile of importPlan.files) {
         let sourceRowNum = 0;
 
-        for await (const row of this.readDelimitedRows<CourtDateRow>(filePath, {
-          delimiter: "\t",
-          encoding: "utf-8",
-        })) {
+        for await (const row of this.readDelimitedRows<CourtDateRow>(
+          preparedFile.filePath,
+          {
+            delimiter: "\t",
+            encoding: preparedFile.encoding,
+          },
+        )) {
           sourceRowNum += 1;
           insertRow.run(
             row.case || "",
@@ -965,8 +1008,7 @@ export class RegistryIndexService implements OnModuleDestroy {
             row.court_room || "",
             row.case_involved || "",
             row.case_description || "",
-            JSON.stringify(row),
-            path.basename(filePath),
+            preparedFile.sourceFileName,
             sourceRowNum,
             batchId,
             now,
@@ -977,11 +1019,14 @@ export class RegistryIndexService implements OnModuleDestroy {
       }
 
       db.exec("COMMIT");
-      return rowsImported;
     } catch (error) {
-      db.exec("ROLLBACK");
+      this.rollbackTransaction(db, "court_dates rebuild");
+      await cleanupPreparedSourceImportPlan(importPlan).catch(() => undefined);
       throw error;
     }
+
+    await this.finalizeConsumedSourceImport("court_dates", importPlan);
+    return rowsImported;
   }
 
   private async listSourceFiles(source: ImportSourceCode): Promise<string[]> {
@@ -1110,6 +1155,163 @@ export class RegistryIndexService implements OnModuleDestroy {
       .join(" AND ");
   }
 
+  private queryCourtRegistryRows(
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): Array<Record<string, string>> {
+    const conditions: string[] = [];
+    const params: string[] = [];
+    const normalizedCaseNumber = this.normalizeCaseNumber(
+      options.caseNumber || "",
+    );
+
+    if (normalizedCaseNumber) {
+      conditions.push(`p.case_number_normalized LIKE ?`);
+      params.push(`%${normalizedCaseNumber}%`);
+    }
+
+    if (options.institutionName) {
+      conditions.push(`LOWER(COALESCE(p.court_name, '')) LIKE LOWER(?)`);
+      params.push(`%${options.institutionName}%`);
+    }
+
+    if (options.role) {
+      conditions.push(`LOWER(COALESCE(p.participant_role, '')) LIKE LOWER(?)`);
+      params.push(`%${options.role}%`);
+    }
+
+    if (options.status) {
+      conditions.push(`LOWER(COALESCE(p.stage_name, '')) LIKE LOWER(?)`);
+      params.push(`%${options.status}%`);
+    }
+
+    if (options.judge) {
+      conditions.push(`LOWER(COALESCE(p.judge, '')) LIKE LOWER(?)`);
+      params.push(`%${options.judge}%`);
+    }
+
+    if (options.proceedingNumber) {
+      conditions.push(`LOWER(COALESCE(p.case_proc, '')) LIKE LOWER(?)`);
+      params.push(`%${options.proceedingNumber}%`);
+    }
+
+    if (options.proceedingType) {
+      conditions.push(`LOWER(COALESCE(p.record_type, '')) LIKE LOWER(?)`);
+      params.push(`%${options.proceedingType}%`);
+    }
+
+    if (normalizedQuery) {
+      const matchQuery = this.buildFtsQuery(normalizedQuery);
+      return this.getDb()
+        .prepare(
+          `
+          SELECT
+            p.case_number,
+            p.participant_raw,
+            p.participant_role,
+            p.court_name,
+            p.case_proc,
+            p.registration_date,
+            p.judge,
+            p.stage_date,
+            p.stage_name,
+            p.record_type,
+            p.case_description,
+            p.participants
+          FROM court_registry_participants_fts f
+          JOIN court_registry_participants p ON p.id = f.rowid
+          WHERE court_registry_participants_fts MATCH ?
+            ${conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""}
+          LIMIT 400
+          `,
+        )
+        .all(matchQuery, ...params) as Array<Record<string, string>>;
+    }
+
+    return this.getDb()
+      .prepare(
+        `
+        SELECT
+          case_number,
+          participant_raw,
+          participant_role,
+          court_name,
+          case_proc,
+          registration_date,
+          judge,
+          stage_date,
+          stage_name,
+          record_type,
+          case_description,
+          participants
+        FROM court_registry_participants p
+        ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
+        LIMIT 400
+        `,
+      )
+      .all(...params) as Array<Record<string, string>>;
+  }
+
+  private queryAsvpRows(
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): Array<Record<string, string>> {
+    const conditions: string[] = [];
+    const params: string[] = [];
+    const normalizedCaseNumber = this.normalizeCaseNumber(
+      options.caseNumber || "",
+    );
+
+    if (normalizedCaseNumber) {
+      conditions.push(`LOWER(COALESCE(a.vp_ordernum, '')) LIKE LOWER(?)`);
+      params.push(`%${normalizedCaseNumber}%`);
+    }
+
+    if (options.institutionName) {
+      conditions.push(`LOWER(COALESCE(a.org_name, '')) LIKE LOWER(?)`);
+      params.push(`%${options.institutionName}%`);
+    }
+
+    if (options.status) {
+      conditions.push(`LOWER(COALESCE(a.vp_state, '')) LIKE LOWER(?)`);
+      params.push(`%${options.status}%`);
+    }
+
+    if (options.proceedingNumber) {
+      conditions.push(`LOWER(COALESCE(a.dvs_code, '')) LIKE LOWER(?)`);
+      params.push(`%${options.proceedingNumber}%`);
+    }
+
+    if (normalizedQuery) {
+      const matchQuery = this.buildFtsQuery(normalizedQuery);
+      return this.getDb()
+        .prepare(
+          `
+          SELECT
+            a.*
+          FROM asvp_records_fts f
+          JOIN asvp_records a ON a.id = f.rowid
+          WHERE asvp_records_fts MATCH ?
+            ${conditions.length > 0 ? `AND ${conditions.join(" AND ")}` : ""}
+          LIMIT 400
+          `,
+        )
+        .all(matchQuery, ...params) as Array<Record<string, string>>;
+    }
+
+    return this.getDb()
+      .prepare(
+        `
+        SELECT
+          *
+        FROM asvp_records a
+        ${conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : ""}
+        LIMIT 400
+        `,
+      )
+      .all(...params) as Array<Record<string, string>>;
+  }
+
   private splitParticipants(value: string): string[] {
     return (value || "")
       .split(",")
@@ -1146,6 +1348,80 @@ export class RegistryIndexService implements OnModuleDestroy {
     ]
       .filter(Boolean)
       .join(", ");
+  }
+
+  private matchesCourtRowFilters(
+    row: Record<string, string>,
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): boolean {
+    return (
+      this.matchesSearchQuery(
+        this.normalizeSearchValue(row.participant_raw || ""),
+        normalizedQuery,
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeCaseNumber(row.case_number || ""),
+        this.normalizeCaseNumber(options.caseNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.court_name || ""),
+        this.normalizeSearchValue(options.institutionName || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.participant_role || ""),
+        this.normalizeSearchValue(options.role || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.stage_name || ""),
+        this.normalizeSearchValue(options.status || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.judge || ""),
+        this.normalizeSearchValue(options.judge || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.case_proc || ""),
+        this.normalizeSearchValue(options.proceedingNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.record_type || ""),
+        this.normalizeSearchValue(options.proceedingType || ""),
+      )
+    );
+  }
+
+  private matchesAsvpRowFilters(
+    row: Record<string, string>,
+    options: CourtRegistrySearchOptions,
+    role: "Боржник" | "Стягувач",
+  ): boolean {
+    return (
+      this.matchesContainsFilter(
+        this.normalizeCaseNumber(row.vp_ordernum || ""),
+        this.normalizeCaseNumber(options.caseNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.org_name || ""),
+        this.normalizeSearchValue(options.institutionName || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(role),
+        this.normalizeSearchValue(options.role || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.vp_state || ""),
+        this.normalizeSearchValue(options.status || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(row.dvs_code || ""),
+        this.normalizeSearchValue(options.proceedingNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue("Виконавче провадження"),
+        this.normalizeSearchValue(options.proceedingType || ""),
+      )
+    );
   }
 
   private matchesDateRange(
@@ -1287,6 +1563,118 @@ export class RegistryIndexService implements OnModuleDestroy {
       .toLocaleLowerCase("uk-UA");
   }
 
+  private matchesSearchQuery(
+    normalizedCandidate: string,
+    normalizedQuery: string,
+  ): boolean {
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    if (normalizedCandidate.includes(normalizedQuery)) {
+      return true;
+    }
+
+    const candidateTokens = this.tokenizeSearchValue(normalizedCandidate);
+    const queryTokens = this.tokenizeSearchValue(normalizedQuery);
+
+    if (queryTokens.length === 0) {
+      return false;
+    }
+
+    return queryTokens.every((queryToken) =>
+      candidateTokens.some(
+        (candidateToken) =>
+          candidateToken === queryToken ||
+          candidateToken.startsWith(queryToken) ||
+          queryToken.startsWith(candidateToken),
+      ),
+    );
+  }
+
+  private matchesContainsFilter(
+    normalizedCandidate: string,
+    normalizedFilter: string,
+  ): boolean {
+    if (!normalizedFilter) {
+      return true;
+    }
+
+    if (!normalizedCandidate) {
+      return false;
+    }
+
+    return normalizedCandidate.includes(normalizedFilter);
+  }
+
+  private compareSearchResults(
+    leftValue: string,
+    rightValue: string,
+    normalizedQuery: string,
+  ): number {
+    const leftScore = this.getSearchScore(leftValue, normalizedQuery);
+    const rightScore = this.getSearchScore(rightValue, normalizedQuery);
+
+    if (leftScore !== rightScore) {
+      return rightScore - leftScore;
+    }
+
+    return leftValue.localeCompare(rightValue, "uk-UA");
+  }
+
+  private getSearchScore(value: string, normalizedQuery: string): number {
+    const normalizedValue = this.normalizeSearchValue(value);
+
+    if (!normalizedValue || !normalizedQuery) {
+      return 0;
+    }
+
+    const valueTokens = this.tokenizeSearchValue(normalizedValue);
+    const queryTokens = this.tokenizeSearchValue(normalizedQuery);
+    let score = 0;
+
+    if (normalizedValue === normalizedQuery) {
+      score += 1000;
+    } else if (normalizedValue.startsWith(normalizedQuery)) {
+      score += 700;
+    } else if (normalizedValue.includes(normalizedQuery)) {
+      score += 500;
+    }
+
+    queryTokens.forEach((queryToken, index) => {
+      const tokenIndex = valueTokens.findIndex(
+        (valueToken) =>
+          valueToken === queryToken ||
+          valueToken.startsWith(queryToken) ||
+          queryToken.startsWith(valueToken),
+      );
+
+      if (tokenIndex === -1) {
+        return;
+      }
+
+      score += valueTokens[tokenIndex] === queryToken ? 120 : 80;
+
+      if (tokenIndex === index) {
+        score += 30;
+      }
+    });
+
+    score -= Math.abs(normalizedValue.length - normalizedQuery.length);
+    return score;
+  }
+
+  private tokenizeSearchValue(value: string): string[] {
+    return value
+      .split(/[-\s"'.,;:()[\]{}\\+/]+/)
+      .map((token) => token.trim())
+      .filter(Boolean);
+  }
+
   private normalizeCaseNumber(value: string): string {
     return value
       .normalize("NFKC")
@@ -1302,5 +1690,300 @@ export class RegistryIndexService implements OnModuleDestroy {
     }
 
     return this.db;
+  }
+
+  private async migrateLegacyRegistrySchema(
+    database: SqliteDatabase,
+  ): Promise<void> {
+    let migrated = false;
+
+    if (this.tableHasColumn(database, "asvp_records", "raw_row_json")) {
+      database.exec("BEGIN IMMEDIATE");
+
+      try {
+        database.exec(`
+          DROP TABLE IF EXISTS asvp_records_migrated;
+          CREATE TABLE asvp_records_migrated (
+            id INTEGER PRIMARY KEY,
+            vp_ordernum TEXT,
+            debtor_name TEXT,
+            debtor_name_normalized TEXT,
+            creditor_name TEXT,
+            creditor_name_normalized TEXT,
+            org_name TEXT,
+            org_name_normalized TEXT,
+            vp_begindate TEXT,
+            vp_state TEXT,
+            dvs_code TEXT,
+            phone_num TEXT,
+            email_addr TEXT,
+            bank_account TEXT,
+            source_file TEXT,
+            source_row_num INTEGER NULL,
+            import_batch_id TEXT,
+            created_at TEXT,
+            updated_at TEXT
+          );
+          INSERT INTO asvp_records_migrated (
+            id,
+            vp_ordernum,
+            debtor_name,
+            debtor_name_normalized,
+            creditor_name,
+            creditor_name_normalized,
+            org_name,
+            org_name_normalized,
+            vp_begindate,
+            vp_state,
+            dvs_code,
+            phone_num,
+            email_addr,
+            bank_account,
+            source_file,
+            source_row_num,
+            import_batch_id,
+            created_at,
+            updated_at
+          )
+          SELECT
+            id,
+            vp_ordernum,
+            debtor_name,
+            debtor_name_normalized,
+            creditor_name,
+            creditor_name_normalized,
+            org_name,
+            org_name_normalized,
+            vp_begindate,
+            vp_state,
+            dvs_code,
+            phone_num,
+            email_addr,
+            bank_account,
+            source_file,
+            source_row_num,
+            import_batch_id,
+            created_at,
+            updated_at
+          FROM asvp_records;
+          DROP TABLE asvp_records;
+          ALTER TABLE asvp_records_migrated RENAME TO asvp_records;
+          CREATE INDEX IF NOT EXISTS idx_asvp_vp_ordernum
+            ON asvp_records(vp_ordernum);
+          CREATE INDEX IF NOT EXISTS idx_asvp_debtor_name_normalized
+            ON asvp_records(debtor_name_normalized);
+          CREATE INDEX IF NOT EXISTS idx_asvp_creditor_name_normalized
+            ON asvp_records(creditor_name_normalized);
+          CREATE INDEX IF NOT EXISTS idx_asvp_org_name_normalized
+            ON asvp_records(org_name_normalized);
+          DROP TABLE IF EXISTS asvp_records_fts;
+          CREATE VIRTUAL TABLE asvp_records_fts
+            USING fts5(
+              debtor_name,
+              debtor_name_normalized,
+              creditor_name,
+              creditor_name_normalized,
+              org_name,
+              org_name_normalized,
+              content='asvp_records',
+              content_rowid='id',
+              tokenize='unicode61'
+            );
+          INSERT INTO asvp_records_fts(asvp_records_fts) VALUES('rebuild');
+        `);
+        database.exec("COMMIT");
+        migrated = true;
+      } catch (error) {
+        this.rollbackTransaction(database, "legacy asvp schema migration");
+        throw error;
+      }
+    }
+
+    if (this.tableHasColumn(database, "court_dates", "raw_row_json")) {
+      database.exec("BEGIN IMMEDIATE");
+
+      try {
+        database.exec(`
+          DROP TABLE IF EXISTS court_dates_migrated;
+          CREATE TABLE court_dates_migrated (
+            id INTEGER PRIMARY KEY,
+            case_number TEXT,
+            case_number_normalized TEXT,
+            date TEXT,
+            judges TEXT,
+            court_name TEXT,
+            court_room TEXT,
+            case_involved TEXT,
+            case_description TEXT,
+            source_file TEXT,
+            source_row_num INTEGER NULL,
+            import_batch_id TEXT,
+            created_at TEXT,
+            updated_at TEXT
+          );
+          INSERT INTO court_dates_migrated (
+            id,
+            case_number,
+            case_number_normalized,
+            date,
+            judges,
+            court_name,
+            court_room,
+            case_involved,
+            case_description,
+            source_file,
+            source_row_num,
+            import_batch_id,
+            created_at,
+            updated_at
+          )
+          SELECT
+            id,
+            case_number,
+            case_number_normalized,
+            date,
+            judges,
+            court_name,
+            court_room,
+            case_involved,
+            case_description,
+            source_file,
+            source_row_num,
+            import_batch_id,
+            created_at,
+            updated_at
+          FROM court_dates;
+          DROP TABLE court_dates;
+          ALTER TABLE court_dates_migrated RENAME TO court_dates;
+          CREATE INDEX IF NOT EXISTS idx_court_dates_case_number
+            ON court_dates(case_number_normalized);
+        `);
+        database.exec("COMMIT");
+        migrated = true;
+      } catch (error) {
+        this.rollbackTransaction(
+          database,
+          "legacy court_dates schema migration",
+        );
+        throw error;
+      }
+    }
+
+    if (migrated) {
+      database.pragma("wal_checkpoint(TRUNCATE)");
+      database.exec("VACUUM");
+    }
+  }
+
+  private tableHasColumn(
+    database: SqliteDatabase,
+    tableName: string,
+    columnName: string,
+  ): boolean {
+    const columns = database
+      .prepare(`PRAGMA table_info(${tableName})`)
+      .all() as Array<{ name?: string }>;
+
+    return columns.some((column) => column.name === columnName);
+  }
+
+  private rollbackTransaction(db: SqliteDatabase, context: string): void {
+    try {
+      db.exec("ROLLBACK");
+    } catch (error) {
+      this.logger.warn(
+        `Rollback warning during ${context}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private compactWriteAheadLogIfPossible(): void {
+    try {
+      const db = this.getDb();
+      db.pragma("wal_checkpoint(TRUNCATE)");
+    } catch (error) {
+      this.logger.warn(
+        `SQLite WAL checkpoint warning: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async finalizeConsumedSourceImport(
+    source: ImportSourceCode,
+    importPlan: {
+      files: Array<{
+        filePath: string;
+        encoding: "utf-8" | "asvp-repaired";
+        sourceFileName: string;
+      }>;
+      sourceFilesToDelete: string[];
+      tempRoot: string | null;
+    },
+  ): Promise<void> {
+    try {
+      await finalizePreparedSourceImportPlan(source, importPlan, {
+        deleteSourceFiles: this.deleteImportedSourceFiles[source],
+      });
+    } catch (error) {
+      this.logger.warn(
+        `${source} source cleanup warning: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async cleanupUnchangedSourceFiles(
+    source: ImportSourceCode,
+    files: string[],
+    currentState:
+      | {
+          extracted_hash?: string;
+          last_status?: string;
+          rows_imported?: number;
+        }
+      | undefined,
+  ): Promise<void> {
+    if (
+      !this.deleteImportedSourceFiles[source] ||
+      currentState?.last_status !== "success" ||
+      (currentState.rows_imported || 0) <= 0
+    ) {
+      return;
+    }
+
+    try {
+      await Promise.all(files.map((filePath) => rm(filePath, { force: true })));
+      this.logger.log(
+        `Deleted ${files.length} unchanged ${source} source file(s) after shared-index verification`,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `${source} unchanged source cleanup warning: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+  }
+
+  private async runSourceRebuildSerialized(
+    source: ImportSourceCode,
+    task: () => Promise<void>,
+  ): Promise<void> {
+    const previous = this.sourceRebuilds.get(source) || Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    this.sourceRebuilds.set(source, next);
+
+    try {
+      await next;
+    } finally {
+      if (this.sourceRebuilds.get(source) === next) {
+        this.sourceRebuilds.delete(source);
+      }
+    }
   }
 }

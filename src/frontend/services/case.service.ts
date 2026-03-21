@@ -9,6 +9,8 @@ import {
   TimelineEvent,
   NextCaseNumberResponse,
   CaseRegistrySearchResult,
+  RegistrySearchFilters,
+  RegistryHearingSuggestion,
 } from "../types/case.types";
 
 /**
@@ -74,6 +76,26 @@ class CaseService {
     return api.get<TimelineEvent[]>(`${this.baseUrl}/${id}/timeline`);
   }
 
+  async getRegistryHearingSuggestion(
+    id: string,
+  ): Promise<RegistryHearingSuggestion | null> {
+    return api.get<RegistryHearingSuggestion | null>(
+      `${this.baseUrl}/${id}/registry-hearing-suggestion`,
+    );
+  }
+
+  async getRegistryHearingNotifications(): Promise<
+    RegistryHearingSuggestion[]
+  > {
+    return api.get<RegistryHearingSuggestion[]>(
+      `${this.baseUrl}/registry-hearing-notifications`,
+    );
+  }
+
+  async createRegistryHearingEvent(id: string): Promise<any> {
+    return api.post(`${this.baseUrl}/${id}/registry-hearing-event`);
+  }
+
   /**
    * Create case
    */
@@ -88,11 +110,9 @@ class CaseService {
     );
   }
 
-  async searchRegistries(params: {
-    query: string;
-    dateFrom?: string;
-    dateTo?: string;
-  }): Promise<CaseRegistrySearchResult[]> {
+  async searchRegistries(
+    params: RegistrySearchFilters,
+  ): Promise<CaseRegistrySearchResult[]> {
     const searchParams = new URLSearchParams();
 
     Object.entries(params).forEach(([key, value]) => {

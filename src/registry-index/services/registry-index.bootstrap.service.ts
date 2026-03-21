@@ -12,7 +12,11 @@ export class RegistryIndexBootstrapService implements OnApplicationBootstrap {
   constructor(private readonly registryIndexService: RegistryIndexService) {}
 
   onApplicationBootstrap(): void {
-    if (this.warmupStarted || !shouldRunScheduledTasks()) {
+    if (
+      this.warmupStarted ||
+      !shouldRunScheduledTasks() ||
+      this.isExternalDataConfigured()
+    ) {
       return;
     }
 
@@ -25,7 +29,7 @@ export class RegistryIndexBootstrapService implements OnApplicationBootstrap {
 
   private getWarmupSources(): WarmupSource[] {
     const configured = (
-      process.env.REGISTRY_INDEX_WARMUP_SOURCES || "court_stan,court_dates"
+      process.env.REGISTRY_INDEX_WARMUP_SOURCES || "court_stan,asvp,court_dates"
     )
       .split(",")
       .map((value) => value.trim())
@@ -34,7 +38,9 @@ export class RegistryIndexBootstrapService implements OnApplicationBootstrap {
           value === "court_stan" || value === "asvp" || value === "court_dates",
       );
 
-    return configured.length > 0 ? configured : ["court_stan", "court_dates"];
+    return configured.length > 0
+      ? configured
+      : ["court_stan", "asvp", "court_dates"];
   }
 
   private async warmupIndexes(sources: WarmupSource[]): Promise<void> {
@@ -49,5 +55,14 @@ export class RegistryIndexBootstrapService implements OnApplicationBootstrap {
         );
       }
     }
+  }
+
+  private isExternalDataConfigured(): boolean {
+    return [
+      process.env.EXTERNAL_DATA_URLS_COURT_STAN,
+      process.env.EXTERNAL_DATA_URLS_COURT_DATES,
+      process.env.EXTERNAL_DATA_URLS_REESTR,
+      process.env.EXTERNAL_DATA_URLS_ASVP,
+    ].some((value) => Boolean(value?.trim()));
   }
 }

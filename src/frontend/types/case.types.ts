@@ -124,6 +124,20 @@ export interface NextCaseNumberResponse {
 
 export type RegistrySearchSource = "court_registry" | "asvp";
 
+export interface RegistrySearchFilters {
+  query?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  source?: RegistrySearchSource;
+  caseNumber?: string;
+  institutionName?: string;
+  role?: string;
+  status?: string;
+  judge?: string;
+  proceedingNumber?: string;
+  proceedingType?: string;
+}
+
 export interface CaseRegistrySearchResult {
   source: RegistrySearchSource;
   sourceLabel: string;
@@ -142,6 +156,20 @@ export interface CaseRegistrySearchResult {
   counterpartyName?: string;
   counterpartyRole?: string;
   enforcementState?: string;
+}
+
+export interface RegistryHearingSuggestion {
+  caseId: string;
+  caseNumber: string;
+  registryCaseNumber?: string | null;
+  date: string;
+  courtName: string;
+  courtRoom: string;
+  judges: string;
+  caseInvolved: string;
+  caseDescription: string;
+  matchedBy: string[];
+  eventAlreadyExists: boolean;
 }
 
 export interface TimelineEvent {

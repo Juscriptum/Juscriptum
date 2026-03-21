@@ -7,6 +7,7 @@ import {
 import { InjectRepository } from "@nestjs/typeorm";
 import { Brackets, Repository, IsNull } from "typeorm";
 import { Client } from "../../database/entities/Client.entity";
+import { Case } from "../../database/entities/Case.entity";
 import { ClientNumberRelease } from "../../database/entities/ClientNumberRelease.entity";
 import { Organization } from "../../database/entities/Organization.entity";
 import {
@@ -43,6 +44,8 @@ export class ClientService {
   constructor(
     @InjectRepository(Client)
     private readonly clientRepository: Repository<Client>,
+    @InjectRepository(Case)
+    private readonly caseRepository: Repository<Case>,
     @InjectRepository(ClientNumberRelease)
     private readonly clientNumberReleaseRepository: Repository<ClientNumberRelease>,
     @InjectRepository(Organization)
@@ -329,6 +332,29 @@ export class ClientService {
       updatedBy: userId,
     });
 
+    if (dto.status === "archived" && client.status === "archived") {
+      return this.clientRepository.manager.transaction(async (manager) => {
+        const clientRepository = manager.getRepository(Client);
+        const caseRepository = manager.getRepository(Case);
+
+        const savedClient = await clientRepository.save(client);
+
+        await caseRepository.update(
+          {
+            tenantId,
+            clientId: id,
+            deletedAt: IsNull(),
+          },
+          {
+            status: "archived",
+            updatedBy: userId,
+          },
+        );
+
+        return savedClient;
+      });
+    }
+
     return this.clientRepository.save(client);
   }
 
@@ -359,8 +385,10 @@ export class ClientService {
 
     await this.clientRepository.manager.transaction(async (manager) => {
       const clientRepository = manager.getRepository(Client);
+      const caseRepository = manager.getRepository(Case);
       const clientNumberReleaseRepository =
         manager.getRepository(ClientNumberRelease);
+      const deletedAt = new Date();
 
       if (dto.releaseClientNumber && clientNumberValue !== null) {
         const existingRelease = await clientNumberReleaseRepository.findOne({
@@ -384,7 +412,19 @@ export class ClientService {
       await clientRepository.update(
         { id, tenantId },
         {
-          deletedAt: new Date(),
+          deletedAt,
+          updatedBy: userId,
+        },
+      );
+
+      await caseRepository.update(
+        {
+          tenantId,
+          clientId: id,
+          deletedAt: IsNull(),
+        },
+        {
+          deletedAt,
           updatedBy: userId,
         },
       );

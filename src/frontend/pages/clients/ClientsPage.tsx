@@ -84,7 +84,20 @@ export const ClientsPage: React.FC = () => {
   };
 
   const handleDelete = async (client: Client) => {
-    if (!window.confirm("Ви впевнені, що хочете видалити цього клієнта?")) {
+    const clientName = getClientDisplayName(client);
+    const shouldDelete = window.confirm(
+      `Видалення клієнта "${clientName}" також видалить усі пов'язані дані: справи, документи, нотатки, події, розрахунки та інші записи.\n\nНатисніть "OK", щоб продовжити видалення, або "Скасувати", щоб замість цього запропонувати архівацію.`,
+    );
+
+    if (!shouldDelete) {
+      const shouldArchive = window.confirm(
+        `Архівувати клієнта "${clientName}" замість видалення?\n\nКлієнт зникне з активного реєстру, але запис залишиться в архіві.`,
+      );
+
+      if (shouldArchive) {
+        await handleArchive(client);
+      }
+
       return;
     }
 

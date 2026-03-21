@@ -4,6 +4,7 @@ import { Repository } from "typeorm";
 import { NotFoundException, ForbiddenException } from "@nestjs/common";
 import { ClientService } from "./client.service";
 import { Client } from "../../database/entities/Client.entity";
+import { Case } from "../../database/entities/Case.entity";
 import { ClientNumberRelease } from "../../database/entities/ClientNumberRelease.entity";
 import { Organization } from "../../database/entities/Organization.entity";
 import * as validationUtil from "../../common/utils/validation.util";
@@ -14,6 +15,7 @@ jest.mock("../../common/utils/validation.util");
 describe("ClientService", () => {
   let service: ClientService;
   let clientRepository: jest.Mocked<Repository<Client>>;
+  let caseRepository: jest.Mocked<Repository<Case>>;
   let clientNumberReleaseRepository: jest.Mocked<
     Repository<ClientNumberRelease>
   >;
@@ -80,8 +82,17 @@ describe("ClientService", () => {
   beforeEach(async () => {
     const transaction = jest.fn(async (callback: any) =>
       callback({
-        getRepository: (entity: unknown) =>
-          entity === Client ? clientRepository : clientNumberReleaseRepository,
+        getRepository: (entity: unknown) => {
+          if (entity === Client) {
+            return clientRepository;
+          }
+
+          if (entity === Case) {
+            return caseRepository;
+          }
+
+          return clientNumberReleaseRepository;
+        },
       }),
     );
 
@@ -100,6 +111,12 @@ describe("ClientService", () => {
             manager: {
               transaction,
             },
+          },
+        },
+        {
+          provide: getRepositoryToken(Case),
+          useValue: {
+            update: jest.fn(),
           },
         },
         {
@@ -122,6 +139,7 @@ describe("ClientService", () => {
 
     service = module.get<ClientService>(ClientService);
     clientRepository = module.get(getRepositoryToken(Client));
+    caseRepository = module.get(getRepositoryToken(Case));
     clientNumberReleaseRepository = module.get(
       getRepositoryToken(ClientNumberRelease),
     );
@@ -151,6 +169,7 @@ describe("ClientService", () => {
     clientNumberReleaseRepository.remove.mockResolvedValue(
       {} as ClientNumberRelease,
     );
+    caseRepository.update.mockResolvedValue({} as any);
     clientRepository.count.mockResolvedValue(0);
     organizationRepository.findOne.mockResolvedValue({
       subscriptionPlan: "professional",
@@ -662,6 +681,17 @@ describe("ClientService", () => {
           updatedBy: mockUserId,
         },
       );
+      expect(caseRepository.update).toHaveBeenCalledWith(
+        {
+          tenantId: mockTenantId,
+          clientId: mockClientId,
+          deletedAt: expect.anything(),
+        },
+        {
+          deletedAt: expect.any(Date),
+          updatedBy: mockUserId,
+        },
+      );
     });
 
     it("should release client number when requested", async () => {
@@ -720,6 +750,41 @@ describe("ClientService", () => {
           id: mockClientId,
         }),
       );
+    });
+  });
+
+  describe("archive cascade", () => {
+    it("should archive all active client cases when client is archived", async () => {
+      clientRepository.findOne.mockResolvedValue({
+        ...mockClient,
+        status: "active",
+      } as unknown as Client);
+      clientRepository.save.mockResolvedValue({
+        ...mockClient,
+        status: "archived",
+      } as unknown as Client);
+
+      const result = await service.update(
+        mockTenantId,
+        mockClientId,
+        mockUserId,
+        {
+          status: "archived",
+        },
+      );
+
+      expect(caseRepository.update).toHaveBeenCalledWith(
+        {
+          tenantId: mockTenantId,
+          clientId: mockClientId,
+          deletedAt: expect.anything(),
+        },
+        {
+          status: "archived",
+          updatedBy: mockUserId,
+        },
+      );
+      expect(result.status).toBe("archived");
     });
   });
 

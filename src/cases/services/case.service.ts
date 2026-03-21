@@ -405,6 +405,96 @@ export class CaseService {
     return savedCase;
   }
 
+  async getRegistryHearingSuggestion(
+    tenantId: string,
+    id: string,
+    actor?: JwtPayload,
+  ) {
+    const caseEntity = await this.caseRepository.findOne({
+      where: {
+        id,
+        tenantId,
+        deletedAt: IsNull(),
+      },
+      relations: ["client"],
+    });
+
+    if (!caseEntity) {
+      throw new NotFoundException("Справу не знайдено");
+    }
+
+    if (actor) {
+      assertCanAccessRecord(actor, caseEntity);
+    }
+
+    return this.caseRegistrySyncService.getRegistryHearingSuggestion(
+      caseEntity,
+    );
+  }
+
+  async createRegistryHearingEvent(
+    tenantId: string,
+    id: string,
+    userId: string,
+    actor?: JwtPayload,
+  ) {
+    const caseEntity = await this.caseRepository.findOne({
+      where: {
+        id,
+        tenantId,
+        deletedAt: IsNull(),
+      },
+      relations: ["client"],
+    });
+
+    if (!caseEntity) {
+      throw new NotFoundException("Справу не знайдено");
+    }
+
+    if (actor) {
+      assertCanAccessRecord(actor, caseEntity);
+    }
+
+    return this.caseRegistrySyncService.createSuggestedCourtEvent(
+      caseEntity,
+      userId,
+    );
+  }
+
+  async getRegistryHearingNotifications(
+    tenantId: string,
+    userId: string,
+    actor?: JwtPayload,
+  ) {
+    if (actor) {
+      assertSameTenant(actor, tenantId);
+    }
+
+    const cases = await this.caseRepository.find({
+      where: {
+        tenantId,
+        assignedLawyerId: userId,
+        deletedAt: IsNull(),
+        caseType: "judicial_case",
+      },
+      relations: ["client"],
+      order: {
+        updatedAt: "DESC",
+      },
+      take: 25,
+    });
+
+    const suggestions = await Promise.all(
+      cases.map((caseEntity) =>
+        this.caseRegistrySyncService.getRegistryHearingSuggestion(caseEntity),
+      ),
+    );
+
+    return suggestions.filter(
+      (suggestion) => suggestion && !suggestion.eventAlreadyExists,
+    );
+  }
+
   private async syncRegistryArtifacts(
     caseEntity: Case,
     userId: string,
