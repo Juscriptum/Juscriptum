@@ -6,6 +6,7 @@ import { ScheduleModule } from "@nestjs/schedule";
 import { ThrottlerModule } from "@nestjs/throttler";
 import { LoggingModule } from "./common/logging";
 import { RedisThrottlerStorage } from "./common/security/redis-throttler.storage";
+import { normalizeLegacyDateTimeColumnsForDatabase } from "./common/typeorm/legacy-datetime-column-type";
 import {
   RlsContextStore,
   RlsInterceptor,
@@ -26,11 +27,9 @@ import { NotificationsModule } from "./notifications";
 import { NotesModule } from "./notes";
 import { TrustVerificationModule } from "./trust-verification/trust-verification.module";
 import { ExternalDataModule } from "./external-data/external-data.module";
+import { PlatformAdminModule } from "./platform-admin";
 // import { EnterpriseModule } from './enterprise/enterprise.module';
-import {
-  HealthController,
-  OperationalMonitoringService,
-} from "./common/health";
+import { HealthModule } from "./common/health";
 
 @Module({
   imports: [
@@ -60,6 +59,8 @@ import {
       useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>("NODE_ENV", "development");
         const dbType = configService.get<string>("DB_TYPE", "sqlite");
+
+        normalizeLegacyDateTimeColumnsForDatabase(dbType);
 
         // Support both ts-jest (TS sources) and compiled JS runtime.
         const entitiesPath = `${__dirname}/database/entities/*.entity{.ts,.js}`;
@@ -118,13 +119,13 @@ import {
     NotificationsModule,
     NotesModule,
     TrustVerificationModule,
+    PlatformAdminModule,
     ExternalDataModule,
+    HealthModule,
   ],
-  controllers: [HealthController],
   providers: [
     RlsContextStore,
     RlsQueryRunnerPatcher,
-    OperationalMonitoringService,
     {
       provide: APP_INTERCEPTOR,
       useClass: RlsInterceptor,

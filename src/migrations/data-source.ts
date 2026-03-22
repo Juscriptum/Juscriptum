@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { DataSource, DataSourceOptions } from "typeorm";
+import { normalizeLegacyDateTimeColumnsForDatabase } from "../common/typeorm/legacy-datetime-column-type";
 
 type EnvMap = Record<string, string>;
 
@@ -128,6 +129,7 @@ export function buildMigrationDataSource(): DataSource {
   loadEnvFiles();
 
   const dbType = getEnv("DB_TYPE", "DATABASE_TYPE", "TYPEORM_CONNECTION");
+  normalizeLegacyDateTimeColumnsForDatabase(dbType);
   const options =
     dbType === "postgres" ? buildPostgresOptions() : buildSqliteOptions();
 

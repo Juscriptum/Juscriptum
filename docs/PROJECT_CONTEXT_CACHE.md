@@ -4,8 +4,422 @@
 
 ## Snapshot Date
 
-- Updated: 2026-03-21
-- Scope: local resource audit and runtime/git cleanup, day-one scope decision, staging prep pack, staging env template alignment, launch-readiness status refresh, non-code launch blocker mapping, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, archive page category tabs, client registry search overlay fit/autofill polish, mobile scan-session/PDF foundation, and authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage
+- Updated: 2026-03-22
+- Scope: platform-admin architecture planning and scaffold, separate owner back-office frontend entry, backend blueprint module, dedicated platform-admin auth model, first-owner bootstrap, MFA enrollment surface, safe read-only platform-admin dashboard/organizations metadata layer, shared health module extraction, project/docs alignment, plus the prior local resource audit and runtime/git cleanup, day-one scope decision, staging prep pack, staging env template alignment, launch-readiness status refresh, non-code launch blocker mapping, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, archive page category tabs, event archive cascades, calendar archived toggle, client registry search overlay fit/autofill polish, mobile scan-session/PDF foundation, authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage, the repo-local Law Organizer UI audit skill, the approved frontend UI consistency implementation pass, the canonical shared registry layer for clients/cases/calculations/documents, the dedicated ASVP SQLite cache split, and the ASVP yearly shard migration plus storage cleanup
+
+## 2026-03-22 Postgres Runtime Normalizes Legacy datetime Entity Types
+
+- Added:
+  - `src/common/typeorm/legacy-datetime-column-type.ts`
+  - `src/common/typeorm/legacy-datetime-column-type.spec.ts`
+- Updated:
+  - `src/app.module.ts`
+  - `src/migrations/data-source.ts`
+  - `CLAUDE.md`
+- Runtime/deployment behavior now:
+  - PostgreSQL startup no longer dies during TypeORM metadata validation on legacy entity fields declared with `type: "datetime"`
+  - the app and migration runner normalize those legacy SQLite-oriented metadata entries to postgres-supported `timestamp` before DataSource initialization
+  - SQLite local mode keeps the original `datetime` metadata
+- Verification status:
+  - targeted test and backend build pending in this session
+  - not yet staging/production proven
+
+## 2026-03-22 Platform Admin Safe Dashboard + Organizations Read Models
+
+- Added:
+  - `src/platform-admin/controllers/platform-admin-dashboard.controller.ts`
+  - `src/platform-admin/controllers/platform-admin-organizations.controller.ts`
+  - `src/platform-admin/dto/platform-admin-read-model.dto.ts`
+  - `src/platform-admin/services/platform-admin-read.service.ts`
+  - `src/platform-admin/services/platform-admin-read.service.spec.ts`
+  - `src/common/health/health.module.ts`
+- Updated:
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/platform-admin/services/index.ts`
+  - `src/platform-admin/index.ts`
+  - `src/app.module.ts`
+  - `src/common/health/index.ts`
+  - `src/frontend/platform-admin/platformAdminApi.ts`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `RUN.md`
+  - `CLAUDE.md`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+- Runtime behavior now:
+  - the owner back office exposes `/v1/platform-admin/dashboard/summary` for safe platform KPIs, monitoring state, and high-signal alerts
+  - `/v1/platform-admin/organizations`, `/v1/platform-admin/organizations/:id`, and `/v1/platform-admin/organizations/:id/users` return allow-listed DTOs with masked contacts instead of raw tenant entities
+  - `platform-admin.html` now loads real metadata after login: platform summary, organization registry, organization detail, and masked tenant-user roster
+  - a shared `HealthModule` now exports `OperationalMonitoringService`, which avoids duplicating scheduled health providers when platform-admin reads include readiness metadata
+  - this is still only locally verified; production-like PostgreSQL/RLS-safe privileged metadata reads for platform-admin remain unresolved
+- Verification run in this session:
+  - `npm run lint` -> PASS
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts src/platform-admin/services/platform-admin-read.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Docker Build Context Keeps package-lock.json
+
+- Updated:
+  - `.dockerignore`
+  - `RUN.md`
+  - `CLAUDE.md`
+- Runtime/deployment behavior now:
+  - Docker image builds no longer exclude `package-lock.json` from the build context
+  - the repo can keep using `npm ci` in `Dockerfile` and `Dockerfile.frontend` without the false "existing package-lock.json is missing" failure caused by `.dockerignore`
+  - this specifically unblocks VPS/container builds that upload the repo as-is and rely on the checked-in lockfile
+- Verification status:
+  - local Docker builder verification pending in this session
+  - not yet staging/production proven
+
+## 2026-03-22 Platform Admin Bootstrap + MFA Enrollment Surface
+
+- Added:
+  - `src/frontend/platform-admin/platformAdminApi.ts`
+  - `src/frontend/platform-admin/platformAdminSession.ts`
+- Updated:
+  - `src/platform-admin/controllers/platform-admin-auth.controller.ts`
+  - `src/platform-admin/dto/platform-admin-login.dto.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.spec.ts`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+  - `src/common/config/environment.validator.ts`
+  - `.env.example`
+  - `.env.staging.example`
+  - `RUN.md`
+  - `CLAUDE.md`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+- Runtime behavior now:
+  - the owner back-office exposes `GET /v1/platform-admin/auth/bootstrap-status` for first-owner bootstrap discovery
+  - `POST /v1/platform-admin/auth/bootstrap` creates only the very first platform owner and only when `PLATFORM_ADMIN_BOOTSTRAP_TOKEN` matches
+  - signed-in platform admins can generate a TOTP setup kit with QR code and backup codes through `POST /v1/platform-admin/auth/mfa/setup`
+  - `POST /v1/platform-admin/auth/mfa/confirm` enables MFA, revokes older sessions, and rotates into a fresh MFA-backed session
+  - `platform-admin.html` is now a working separate bootstrap/login/MFA screen, not only a static blueprint page
+  - platform-admin audit tables and safe metadata-only tenant read models are still pending
+- Verification run in this session:
+  - `npm run lint:backend` -> PASS
+  - `npm run lint:frontend` -> PASS
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Platform Admin Dedicated Auth Model + Vite ESM Config
+
+- Added:
+  - `src/database/entities/PlatformAdminUser.entity.ts`
+  - `src/database/entities/PlatformAdminRefreshToken.entity.ts`
+  - `src/database/entities/PlatformAdminRevokedAccessToken.entity.ts`
+  - `src/database/entities/enums/platform-admin.enum.ts`
+  - `src/database/migrations/1711200000000-AddPlatformAdminAuth.ts`
+  - `src/platform-admin/controllers/platform-admin-auth.controller.ts`
+  - `src/platform-admin/dto/platform-admin-login.dto.ts`
+  - `src/platform-admin/guards/platform-admin-jwt-auth.guard.ts`
+  - `src/platform-admin/interfaces/platform-admin-jwt.interface.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.spec.ts`
+  - `src/platform-admin/services/platform-admin-jwt.service.ts`
+  - `src/platform-admin/strategies/platform-admin-jwt.strategy.ts`
+- Updated:
+  - `src/platform-admin/controllers/platform-admin-blueprint.controller.ts`
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/common/config/environment.validator.ts`
+  - `src/common/security/pii-protection.ts`
+  - `.env.example`
+  - `.env.staging.example`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+  - `vite.config.mts`
+- Runtime behavior now:
+  - platform-admin auth has its own user, refresh-token, and revoked-access-token tables instead of leaning on tenant-bound JWT payloads
+  - the owner back-office now exposes dedicated auth endpoints under `/v1/platform-admin/auth/*`
+  - the platform-admin blueprint route now uses `PlatformAdminJwtAuthGuard`
+  - `PLATFORM_ADMIN_JWT_SECRET` is now part of environment validation and example env files
+  - Vite now reads `vite.config.mts`, and `npm run build:frontend` no longer prints the old deprecated CJS Node API warning
+  - operator provisioning, MFA enrollment UX, platform-admin audit tables, and production-safe tenant read models are still pending
+- Verification run in this session:
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts` -> PASS
+  - `npm run lint:backend` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Platform Admin Architecture Scaffold
+
+- Added:
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/platform-admin/blueprint/index.ts`
+  - `src/platform-admin/controllers/platform-admin-blueprint.controller.ts`
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/platform-admin/index.ts`
+  - `platform-admin.html`
+  - `src/frontend/platform-admin/index.tsx`
+  - `src/frontend/platform-admin/index.css`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+- Updated:
+  - `src/app.module.ts`
+  - `src/auth/auth.module.ts`
+  - `vite.config.mts`
+  - `RUN.md`
+  - `CLAUDE.md`
+- Architecture/runtime behavior now:
+  - the repo has one canonical platform-admin blueprint shared between backend and frontend scaffold code
+  - Vite now builds both `index.html` and `platform-admin.html`, giving the owner back-office a separate entry instead of placing it in the tenant CRM navigation
+  - the backend now mounts `PlatformAdminModule` and exposes `GET /v1/platform-admin/blueprint` in the separate platform-admin surface
+  - the scaffold explicitly documents that production-safe platform-admin access still requires a dedicated identity/session model rather than reusing tenant-bound auth long-term
+  - the blueprint locks the MVP to metadata-first access and keeps client/case/document contents, break-glass access, and cross-tenant PII lookup out of scope by default
+- Verification run in this session:
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+  - `npm run lint` -> PASS
+
+## 2026-03-21 ASVP Yearly SQLite Shards + Storage Cleanup
+
+- Updated:
+  - `src/registry-index/services/registry-index.service.ts`
+  - `src/registry-index/services/registry-index.service.spec.ts`
+  - `RUN.md`
+  - `CLAUDE.md`
+- Runtime behavior now:
+  - fresh `asvp` rebuilds keep metadata in `storage/asvp-index.db`
+  - actual indexed ASVP rows now live in yearly shard files under `storage/asvp-index-shards/asvp-YYYY.db`
+  - `court_stan` and `court_dates` remain in `storage/registry-index.db`
+  - `asvp` import metadata and batch tracking now live with the dedicated ASVP metadata DB instead of the shared court cache
+  - indexed ASVP reads aggregate across yearly shard DBs
+  - automatic `data.gov.ua` download plus scheduled rebuild still use the same `ExternalDataService -> rebuildIndexes({ source: 'asvp' })` path from the worker/scheduler flow
+  - `ExternalDataService` now writes remote `ASVP` content into `asvp/split/asvp-YYYY.csv`; for the current large `data.gov.ua` ZIP payload it prefers a resumable temp archive assembled via `Range` chunks in the OS temp directory before the yearly split step, so the workspace still avoids keeping a full raw `ASVP` CSV while the download path survives mid-transfer resets better than a single long-lived direct stream or monolithic curl resume run
+  - explicit regression coverage now verifies that `ExternalDataService` downloads an `asvp` CSV and invokes `rebuildIndexes({ source: "asvp" })`, which is the automatic worker/scheduler handoff
+  - the registry importer and source monitor now recurse into nested `split/` folders, so streamed `asvp/split/*.csv` files are discovered and retried automatically
+  - one-off helper scripts now load `.env` and `.env.local` directly, with `.env.local` taking precedence, so `npm run update:external-data` sees the same external-data settings as the main Nest runtime
+  - read-path fallback still supports legacy monolithic `asvp` data from `storage/registry-index.db` until a new shard rebuild succeeds
+  - this reduces the chance that `asvp` rebuild failures or large free-page churn will inflate the shared court/date registry cache
+  - live verification on `2026-03-22` showed the pure direct-stream path resetting repeatedly against `data.gov.ua`, and a monolithic resumable curl run still failed with repeated connection resets; the preferred live path is now chunked `Range` download into a temp archive before the yearly split/rebuild stages
+- Local storage cleanup completed in this session:
+  - `storage/registry-index.db` was compacted after removing stale shared-db ASVP tables
+  - `../repo-history-backups/` was pruned down to `rewrite-mirror-final-20260321.git`
+  - removed `asvp/28-ex_csv_asvp.csv`
+  - removed `storage/registry-index.pre-clean.backup.db`
+  - removed reproducible `tmp/` and `dist/`
+  - kept `node_modules/` and `.venv-pdf/` in place
+  - current local free space after cleanup is about `56 GiB`
+- Verification run in this session:
+  - `npm test -- --runInBand src/external-data/services/external-data.service.spec.ts` -> PASS
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts` -> PASS
+  - `npm test -- --runInBand src/registry-index/services/registry-index.source-monitor.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+
+## 2026-03-21 Shared Registry Layer For Core Registries
+
+- Added:
+  - `src/frontend/components/registry/RegistryLayout.tsx`
+  - `src/frontend/components/registry/RegistryLayout.css`
+  - `src/frontend/components/registry/index.ts`
+  - `src/frontend/components/index.ts`
+- Updated:
+  - `src/frontend/pages/clients/ClientsPage.tsx`
+  - `src/frontend/pages/clients/ClientsPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/calculations/CalculationsPage.tsx`
+  - `src/frontend/pages/calculations/CalculationsPage.css`
+  - `src/frontend/pages/documents/DocumentsPage.tsx`
+  - `src/frontend/pages/documents/DocumentsPage.css`
+- UI behavior now:
+  - the four core registries share one canonical `registry-*` shell for the card surface, filter bar, search field, labeled date range group, table wrapper, loading state, empty state, and pagination
+  - page-local CSS for these screens no longer carries parallel generic `.filters-bar`, `.search-box`, `.loading-container`, `.empty-state`, and `.pagination` rule sets
+  - future style leakage risk is lower because the shared layer uses prefixed selectors instead of route-generic names
+  - the documents screen now uses the same shell pattern as the other registries while preserving its own explorer/list toggle and file/folder cards
+  - clients, cases, and calculations keep their module-specific table and badge styling, but their registry chrome is now centralized
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+- Still inferred from code, not visually confirmed in this session:
+  - final desktop/tablet/mobile verification is still recommended for the four registries around `1440px`, `1024px`, `768px`, and `390px`
+
+## 2026-03-21 Documents Tablet Header Actions Follow-Up
+
+- Updated:
+  - `src/frontend/pages/documents/DocumentsPage.css`
+- UI behavior now:
+  - the documents header explicitly switches to a stacked tablet layout by `960px`
+  - document page actions now render as a stable 2-column grid on tablet and a 1-column stack on smaller mobile widths
+  - this removes the previous broken tablet layout where `Додати скан` detached into an oversized separate block
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+  - focused browser-style recheck of `/documents` at `1024px` and `768px` with authenticated mocks -> PASS
+  - no console/runtime errors during the focused recheck
+- Visual artifacts from the focused recheck:
+  - `tmp/registry-visual-check/focused-documents-v2/documents-laptop.png`
+  - `tmp/registry-visual-check/focused-documents-v2/documents-tablet.png`
+
+## 2026-03-21 Approved Frontend UI Consistency Pass
+
+- Updated:
+  - `src/frontend/components/navigation/Navigation.tsx`
+  - `src/frontend/components/FormActionBar.css`
+  - `src/frontend/components/DateRangePicker.css`
+  - `src/frontend/components/RecordActionsMenu.css`
+  - `src/frontend/pages/archive/ArchivePage.css`
+  - `src/frontend/pages/billing/BillingPage.tsx`
+  - `src/frontend/pages/billing/BillingPage.css`
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/calendar/CalendarPage.css`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/clients/AddClientPage.tsx`
+  - `src/frontend/pages/clients/ClientDetailsPage.tsx`
+  - `src/frontend/pages/clients/ClientsPage.css`
+  - `src/frontend/pages/clients/ClientsPage.tsx`
+  - `src/frontend/pages/dashboard/DashboardPage.tsx`
+  - `src/frontend/pages/documents/DocumentsPage.css`
+  - `src/frontend/pages/documents/MobileScanPage.css`
+  - `src/frontend/pages/notes/NotesPage.tsx`
+  - `src/frontend/pages/notes/NotesPage.css`
+  - `src/frontend/pages/profile/ProfilePage.tsx`
+  - `src/frontend/pages/profile/ProfilePage.css`
+  - `src/frontend/pages/calculations/CalculationsPage.css`
+- UI behavior now:
+  - page breadcrumbs are rendered at the page level instead of in the shared topbar, which removes duplicate orientation chrome on many desktop screens
+  - dashboard, clients, cases, add-client, calendar, billing, and profile now use the same page-shell orientation model
+  - client and case detail pages keep primary actions exposed while moving secondary actions into `RecordActionsMenu`
+  - notes switch to a stacked card/table fallback on narrow screens instead of relying on a forced horizontal table scroll
+  - calendar week/month views use a compact list-first fallback on narrow screens instead of keeping the full wide grid
+  - `FormActionBar`, `DateRangePicker`, and `RecordActionsMenu` were adjusted for safer touch targets and less horizontal overflow dependence
+  - archive styling now uses canonical frontend token names
+  - profile and billing were aligned to the shared workspace shell; profile styles were also re-scoped so the route does not leak generic form/button selectors into other screens after navigation
+  - clients, cases, calculations, and documents registry filters now share closer control heights/radii and are page-scoped to reduce cross-route CSS bleed
+  - the documents registry now owns its filter-bar surface explicitly instead of inheriting a foreign `.filters-bar` rule
+  - mobile scan card metadata/actions now stack more safely on very narrow devices
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+- Still inferred from code, not visually confirmed in this session:
+  - final desktop/tablet/mobile polish should still be checked in preview around `1440px`, `1024px`, `768px`, and `390px`
+
+## 2026-03-21 Registry Source Monitor Diagnostics + ASVP Error Preservation
+
+- Updated:
+  - `src/registry-index/services/registry-index.source-monitor.service.ts`
+  - `src/registry-index/services/registry-source-import-preparation.ts`
+  - `src/registry-index/services/registry-index.service.ts`
+  - `src/registry-index/services/registry-source-import-preparation.spec.ts`
+  - `src/registry-index/services/registry-index.source-monitor.service.spec.ts`
+  - `src/registry-index/services/registry-index.service.spec.ts`
+- Runtime behavior now:
+  - when the app starts with `RUN_SCHEDULED_JOBS=false`, the registry source monitor checks whether `court_stan/`, `asvp/`, or `court_dates/` already contain CSV files
+  - if snapshots are present, the app logs an explicit warning that automatic monitoring is disabled in this process and points operators to the dedicated worker or the manual `build:registry-index` command
+  - oversized `asvp` snapshots now stay on the original source file by default instead of first creating a full temporary UTF-8 split tree, which lowers peak disk usage during import
+  - ASVP inserts now commit in smaller SQLite transaction slices during the import pass
+  - the previous pre-split behavior remains available only when `ASVP_PRE_SPLIT_ENABLED=true`
+  - SQLite rollback cleanup now ignores no-op `ROLLBACK` attempts, so a secondary `cannot rollback - no transaction is active` message does not replace the real ASVP import failure reason
+  - malformed ASVP CSV rows now keep their original parse error text in `import_state.last_error`
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-source-import-preparation.spec.ts src/registry-index/services/registry-index.source-monitor.service.spec.ts src/registry-index/services/registry-index.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+
+## 2026-03-21 Law Organizer UI Audit Skill
+
+- Added:
+  - `.codex/skills/law-organizer-ui-audit/SKILL.md`
+- Purpose:
+  - give Codex one reusable Law Organizer-specific workflow for UI/UX audit and minimal consistency cleanup across dense CRM/ERP screens
+  - keep audits focused on clarity, consistency, scan efficiency, table/form/filter quality, and realistic desktop/tablet/mobile behavior
+  - require user approval before major layout, navigation, table-structure, form-structure, or broad visual changes
+- Frontend reality captured while creating the skill:
+  - shared shell and primitives exist in `src/frontend/App.tsx`, `src/frontend/index.css`, and `src/frontend/components/*`
+  - important common UI pieces already include `PageHeader`, `FormActionBar`, `RecordActionsMenu`, `DateRangePicker`, and the mobile navigation drawer
+  - many modules still use page-local CSS for filters, registries, cards, tables, and modals, so consistency must be inferred from multiple nearby screens rather than assumed from a complete design system
+  - recurrent inconsistency points include control heights, spacing, filter-bar layouts, table responsive strategies, and modal/overlay patterns across clients, cases, calculations, documents, notes, archive, activity, and workspace/report screens
+  - `src/frontend/pages/archive/ArchivePage.css` currently uses non-canonical variables such as `--border-color`, `--surface-color`, `--text-primary`, and `--text-secondary` instead of the main token family from `src/frontend/index.css`
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-21 Vite Chunking Warnings Removed
+
+- Updated:
+  - `vite.config.ts`
+- Build behavior now:
+  - the frontend build no longer emits the old circular manual-chunk warning between `vendor` and `framework`
+  - large frontend dependencies are split into dedicated chunks for framework, routing, state, forms, HTTP, PDF, TinyMCE, icons, and file/doc viewers
+  - `npm run build:frontend` no longer emits the oversized chunk warning about bundles above `500 kB`
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+  - remaining note:
+    - Vite still prints the existing CJS Node API deprecation notice before the build starts
+
+## 2026-03-21 Event Archive Cascades + Calendar Archived Toggle
+
+- Added real `archived` status support for events in:
+  - `src/database/entities/Event.entity.ts`
+  - `src/events/dto/event.dto.ts`
+- Updated `src/events/services/event.service.ts` so:
+  - archived events are excluded from default event/calendar feeds
+  - archived events are still available explicitly via `status=archived`
+- Updated lifecycle cascades so linked events follow client/case archive-delete actions:
+  - `src/clients/services/client.service.ts`
+    - archiving a client archives linked cases and their linked events
+    - deleting a client soft-deletes linked cases and their linked events
+  - `src/cases/services/case.service.ts`
+    - archiving a case archives its linked events
+    - deleting a case soft-deletes its linked events
+- Registered the event repository for client cascades in:
+  - `src/clients/clients.module.ts`
+- Updated frontend behavior in:
+  - `src/frontend/pages/archive/ArchivePage.tsx`
+    - archive page now renders archived events as a real populated category
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/calendar/CalendarPage.css`
+    - added `Показати архівні події`
+    - when enabled, the current calendar view/list includes past events
+  - `src/frontend/services/event.service.ts`
+  - `src/frontend/types/event.types.ts`
+- Added coverage in:
+  - `src/clients/services/client.service.spec.ts`
+  - `src/cases/services/case.service.spec.ts`
+  - `src/events/services/event.service.spec.ts`
+- Verification run in this session:
+  - `npm test -- --runInBand src/clients/services/client.service.spec.ts src/cases/services/case.service.spec.ts src/events/services/event.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+    - existing Vite circular/manual-chunk and large-chunk warnings remain
+
+## 2026-03-21 Case Events Rename + court_stan Stage Merge
+
+- Updated the case timeline/event flow in:
+  - `src/cases/services/case.service.ts`
+  - `src/cases/services/case.service.spec.ts`
+  - `src/cases/services/case-registry-sync.service.ts`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/pages/cases/CaseDetailsPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/types/case.types.ts`
+- UI and behavior now:
+  - `Timeline справи` is renamed to `Події по справі`
+  - auto-created `court_dates` event descriptions no longer show the technical source phrase
+  - case events listed in the case surface now deep-link into `Календар` and open the matching event modal on the target date
+  - the case timeline includes the latest `court_stan` record as `Стадія розгляду` when it is meaningfully different from the synced `court_dates` hearing
+  - duplicate meaning is suppressed even when `court_stan.stageName` embeds the same hearing date/time text instead of matching the `court_dates` format directly
+- Verification run in this session:
+  - `npm test -- --runInBand src/cases/services/case.service.spec.ts src/cases/services/case-registry-sync.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+    - existing Vite circular/manual-chunk and large-chunk warnings remain
+
+## 2026-03-21 Calendar Participants Cleanup + Case Selector Labels
+
+- Updated:
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/events/AddEventPage.tsx`
+- UI behavior now:
+  - the `Учасники` block in calendar event details ignores technical metadata fields like `court_dates`, registry case numbers, `caseId`, and sync timestamps
+  - synced court events prefer the real participant string from `caseInvolved`
+  - the event creation page case selector now shows both the internal case number and the registry case number when a client case has both
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+    - existing Vite circular/manual-chunk and large-chunk warnings remain
 
 ## 2026-03-21 Client Registry Search Overlay Fit And Autofill Flow
 
@@ -4284,3 +4698,62 @@
 
 ## Risks / Guardrails
 - FIO-driven indexed lookup still depends on the court-registry participant index to produce case numbers first; if a participant is missing or malformed there, the suggestion can still be missed even when a `court_dates` row exists.
+
+### 2026-03-21 Court Dates Direct FIO Matching And Preview-First UX
+
+## Current Snapshot
+- FIO-based registry search now works even when the participant is present in indexed `court_dates` but missing from the indexed court-registry participant table.
+- Name matching now tolerates alternate apostrophe characters in Ukrainian names, so queries like `Мар'яна`, `Мар’яна`, and `Марʼяна` resolve to the same indexed records.
+- Manual "find hearing in registry" actions now open a preview modal above the current screen and offer one-click event creation instead of creating or silently applying data immediately.
+
+## Technical State
+- Updated backend lookup behavior:
+  - `src/registry-index/services/registry-index.service.ts`
+    - added/adjusted indexed `court_dates` participant lookup support used by direct FIO searches
+    - normalized apostrophe variants for registry search matching
+  - `src/clients/services/court-registry.service.ts`
+    - added direct `court_dates` FIO resolution path when court-registry participant data is incomplete
+    - normalized search input and indexed comparisons for alternate apostrophe variants
+- Updated frontend preview flow:
+  - `src/frontend/components/RegistryHearingPreviewModal.tsx`
+  - `src/frontend/components/RegistryHearingPreviewModal.css`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/pages/events/AddEventPage.tsx`
+  - the case card and add-event form now both:
+    - search registry hearing data
+    - render a modal preview with case/date/court/participants
+    - create the event only after explicit user confirmation
+
+## Validation Status
+- `npm run build` -> PASS
+- `npm run build:frontend` -> PASS
+
+## Risks / Guardrails
+- The add-event form still creates the registry-backed event with the currently selected client as the participant subject; if a FIO match is ambiguous across multiple similar people, the modal preview is the safeguard and should remain mandatory.
+- The modal-confirm flow improves accidental-creation safety, but browser/runtime smoke coverage for the exact click path is still manual today.
+
+### 2026-03-21 Calendar Deep-Link And Existing-Event Registry UX Fix
+
+## Current Snapshot
+- Opening an event from a case timeline or registry flow now sends the user to the calendar on the target date without auto-opening the event details modal.
+- The target event is visually highlighted in the calendar list after navigation.
+- Manual registry lookup in the case card now shows the found hearing even when a linked event already exists; in that state the modal action opens the calendar instead of creating a duplicate.
+
+## Technical State
+- Updated `src/frontend/pages/calendar/CalendarPage.tsx` so `eventId`/`date` deep links:
+  - switch the calendar to the target date
+  - scroll the matching event card into view
+  - highlight the matching event card
+  - do not auto-set `selectedEvent`
+- Updated `src/frontend/pages/calendar/CalendarPage.css` with a dedicated highlighted state for deep-linked event cards.
+- Updated `src/frontend/pages/cases/CaseDetailsPage.tsx` so:
+  - registry suggestion modal opens for manual lookup even when `eventAlreadyExists === true`
+  - existing linked events route to `/calendar` using the matching timeline event id/date when available
+  - fallback routing still opens the relevant calendar date when no exact event id can be resolved from the loaded timeline
+
+## Validation Status
+- `npm run build` -> PASS
+- `npm run build:frontend` -> PASS
+
+## Risks / Guardrails
+- The existing-event calendar routing in the case card currently resolves the matching event from the loaded case timeline by date, so if multiple events share the same date in one case it may route to that date without a perfect one-to-one event-id match.

@@ -15,9 +15,15 @@ Do not use it as a free-form diary.
   - `docs/PROJECT_CONTEXT_CACHE.md` for session history
 - Backend: NestJS + TypeORM
 - Frontend: React + Vite in `src/frontend`
+- Platform-owner admin work now has a separate scaffold:
+  - backend module in `src/platform-admin`
+  - separate frontend entry in `platform-admin.html` and `src/frontend/platform-admin`
 - Local default database: SQLite
 - Production-like database: PostgreSQL
-- Registry index SQLite cache in `storage/registry-index.db` is shared across users and is not tenant-scoped
+- Registry SQLite caches are shared across users and are not tenant-scoped:
+  - `storage/registry-index.db` for `court_stan` and `court_dates`
+  - `storage/asvp-index.db` for ASVP import metadata / batch state
+  - `storage/asvp-index-shards/asvp-YYYY.db` for yearly ASVP search shards
 - Current worker model: `src/worker.ts` plus `RUN_SCHEDULED_JOBS` split
 - Current background architecture: scheduled/polling DB-backed jobs, not BullMQ
 
@@ -81,6 +87,427 @@ Do not use it as a free-form diary.
 - whether the checked-in Kubernetes manifests reflect the currently deployed topology
 
 ## Recent Changes / Changelog
+
+### 2026-03-22 - Postgres Runtime Normalizes Legacy datetime Entity Types
+
+- Added:
+  - `src/common/typeorm/legacy-datetime-column-type.ts`
+  - `src/common/typeorm/legacy-datetime-column-type.spec.ts`
+- Updated:
+  - `src/app.module.ts`
+  - `src/migrations/data-source.ts`
+- Current behavior now:
+  - the Nest PostgreSQL runtime rewrites legacy entity metadata with `type: "datetime"` to a postgres-supported `timestamp` type before TypeORM builds metadata
+  - the migration runner applies the same normalization, so PostgreSQL migrations no longer fail before startup on the legacy SQLite-oriented entity definitions
+  - SQLite-backed local development keeps using `datetime`
+  - this specifically addresses the VPS startup failure where `Organization.trialEndAt` and the broader legacy `datetime` set were rejected by PostgreSQL
+- Verification run in this session:
+  - pending targeted test and backend build
+  - staging/production deployment remains unproven
+
+### 2026-03-22 - Platform Admin Safe Dashboard + Organizations Read Models
+
+- Added allow-listed platform-admin read-model pieces in:
+  - `src/platform-admin/controllers/platform-admin-dashboard.controller.ts`
+  - `src/platform-admin/controllers/platform-admin-organizations.controller.ts`
+  - `src/platform-admin/dto/platform-admin-read-model.dto.ts`
+  - `src/platform-admin/services/platform-admin-read.service.ts`
+  - `src/platform-admin/services/platform-admin-read.service.spec.ts`
+  - `src/common/health/health.module.ts`
+- Updated:
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/platform-admin/services/index.ts`
+  - `src/platform-admin/index.ts`
+  - `src/app.module.ts`
+  - `src/common/health/index.ts`
+  - `src/frontend/platform-admin/platformAdminApi.ts`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `RUN.md`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+- Current behavior now:
+  - `/v1/platform-admin/dashboard/summary` returns safe platform KPIs, monitoring state, and high-signal alerts for the owner back office
+  - `/v1/platform-admin/organizations`, `/v1/platform-admin/organizations/:id`, and `/v1/platform-admin/organizations/:id/users` return allow-listed metadata DTOs with masked contact details instead of raw tenant entities
+  - `platform-admin.html` now hydrates real dashboard and organization registry/detail data after login instead of stopping at the auth shell
+  - health monitoring is now exported through a shared `HealthModule` so the owner read-model service can reuse `OperationalMonitoringService` without creating a duplicate scheduled provider instance
+  - the current local read path is still not a PostgreSQL-proven privileged strategy; production-like platform-admin metadata access remains unresolved while RLS stays tenant-scoped
+- Verification run in this session:
+  - `npm run lint` -> PASS
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts src/platform-admin/services/platform-admin-read.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+### 2026-03-22 - Docker Build Context Keeps package-lock.json
+
+- Updated:
+  - `.dockerignore`
+  - `RUN.md`
+- Current behavior now:
+  - Docker build contexts now include the checked-in `package-lock.json` instead of excluding it
+  - `Dockerfile` and `Dockerfile.frontend` can keep using `npm ci` during image builds without failing on a missing lockfile caused by the repo ignore rules
+  - this fixes the VPS/container build path where images were failing before application startup because `package-lock.json` was filtered out of the context
+- Verification run in this session:
+  - pending local Docker builder verification
+  - staging/production deployment is still unproven
+
+### 2026-03-22 - Platform Admin Bootstrap + MFA Enrollment Surface
+
+- Added platform-admin bootstrap and MFA enrollment/auth pieces in:
+  - `src/frontend/platform-admin/platformAdminApi.ts`
+  - `src/frontend/platform-admin/platformAdminSession.ts`
+- Updated:
+  - `src/platform-admin/controllers/platform-admin-auth.controller.ts`
+  - `src/platform-admin/dto/platform-admin-login.dto.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.spec.ts`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+  - `src/common/config/environment.validator.ts`
+  - `.env.example`
+  - `.env.staging.example`
+  - `RUN.md`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+- Current behavior now:
+  - `GET /v1/platform-admin/auth/bootstrap-status` reports whether the first owner still needs bootstrap
+  - `POST /v1/platform-admin/auth/bootstrap` can create only the very first `PlatformAdminUser`, gated by `PLATFORM_ADMIN_BOOTSTRAP_TOKEN`
+  - `POST /v1/platform-admin/auth/mfa/setup` returns a QR code data URL, TOTP secret, and backup codes for the signed-in platform admin
+  - `POST /v1/platform-admin/auth/mfa/confirm` completes enrollment, revokes old sessions, and rotates into an MFA-backed session
+  - `platform-admin.html` is now a working owner bootstrap/login/MFA surface rather than a static blueprint-only page
+  - platform-admin audit tables and production-safe metadata read models are still not implemented
+- Verification run in this session:
+  - `npm run lint:backend` -> PASS
+  - `npm run lint:frontend` -> PASS
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+### 2026-03-22 - Platform Admin Dedicated Auth Model + Vite ESM Config
+
+- Added dedicated platform-admin auth/runtime pieces in:
+  - `src/database/entities/PlatformAdminUser.entity.ts`
+  - `src/database/entities/PlatformAdminRefreshToken.entity.ts`
+  - `src/database/entities/PlatformAdminRevokedAccessToken.entity.ts`
+  - `src/database/entities/enums/platform-admin.enum.ts`
+  - `src/database/migrations/1711200000000-AddPlatformAdminAuth.ts`
+  - `src/platform-admin/controllers/platform-admin-auth.controller.ts`
+  - `src/platform-admin/dto/platform-admin-login.dto.ts`
+  - `src/platform-admin/guards/platform-admin-jwt-auth.guard.ts`
+  - `src/platform-admin/interfaces/platform-admin-jwt.interface.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.ts`
+  - `src/platform-admin/services/platform-admin-auth.service.spec.ts`
+  - `src/platform-admin/services/platform-admin-jwt.service.ts`
+  - `src/platform-admin/strategies/platform-admin-jwt.strategy.ts`
+- Updated:
+  - `src/platform-admin/controllers/platform-admin-blueprint.controller.ts`
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/common/config/environment.validator.ts`
+  - `src/common/security/pii-protection.ts`
+  - `.env.example`
+  - `.env.staging.example`
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+  - `vite.config.mts`
+- Current behavior now:
+  - platform-admin auth has its own user table, refresh-token table, revoked-access-token table, JWT strategy, auth controller, and targeted service tests
+  - `GET /v1/platform-admin/blueprint` now uses the dedicated `PlatformAdminJwtAuthGuard` instead of tenant auth guards
+  - owner back-office JWT secrets are now separated by `PLATFORM_ADMIN_JWT_SECRET`
+  - `npm run build:frontend` no longer prints the old Vite deprecated CJS Node API warning because the config now lives at `vite.config.mts`
+  - production-safe tenant read models, operator provisioning, MFA enrollment UX, and platform-admin audit tables are still not implemented
+- Verification run in this session:
+  - `npm test -- --runInBand src/platform-admin/services/platform-admin-auth.service.spec.ts` -> PASS
+  - `npm run lint:backend` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+### 2026-03-22 - Platform Admin Architecture Scaffold
+
+- Added a dedicated platform-admin blueprint and scaffold in:
+  - `docs/PLATFORM_ADMIN_ARCHITECTURE.md`
+  - `src/platform-admin/blueprint/platform-admin.blueprint.ts`
+  - `src/platform-admin/controllers/platform-admin-blueprint.controller.ts`
+  - `src/platform-admin/platform-admin.module.ts`
+  - `src/frontend/platform-admin/index.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.tsx`
+  - `src/frontend/platform-admin/PlatformAdminApp.css`
+  - `platform-admin.html`
+  - `vite.config.mts`
+  - `src/app.module.ts`
+  - `src/auth/auth.module.ts`
+  - `RUN.md`
+- Current behavior now:
+  - the repo contains one canonical platform-admin blueprint shared by backend and frontend scaffold code
+  - a dedicated `platform-admin.html` entry now exists and renders a separate owner back-office architecture page outside the tenant SPA navigation
+  - the Nest runtime now exposes `GET /v1/platform-admin/blueprint` inside the dedicated platform-admin module
+  - the scaffold explicitly locks MVP decisions around metadata-first access, separate auth, disabled tenant-content access by default, and deferred break-glass workflows
+  - the current codebase at this stage still did not implement production-ready platform-admin identities, sessions, audit tables, or privileged read models
+- Verification run in this session:
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+  - `npm run lint` -> PASS
+
+### 2026-03-21 - ASVP Yearly SQLite Shards + Storage Cleanup
+
+- Updated registry index storage/runtime in:
+  - `src/registry-index/services/registry-index.service.ts`
+  - `src/registry-index/services/registry-index.service.spec.ts`
+  - `RUN.md`
+- Current behavior:
+  - fresh `asvp` imports now keep metadata in `storage/asvp-index.db` and write the actual indexed records into yearly shard files under `storage/asvp-index-shards/`
+  - `court_stan` and `court_dates` remain in `storage/registry-index.db`
+  - `asvp` import metadata, batch tracking, scheduled rebuilds, and `data.gov.ua` auto-download follow the existing `ExternalDataService -> rebuildIndexes({ source: 'asvp' })` path; only the internal on-disk layout changed
+  - `ExternalDataService` now writes remote `ASVP` data into year files under `asvp/split/asvp-YYYY.csv` instead of keeping a full raw `ASVP` snapshot in the workspace; the current `data.gov.ua` ZIP payload now prefers a resumable temp archive assembled via `Range` chunks in the OS temp directory before the yearly split step because both long-lived direct streams and monolithic curl resume runs were resetting mid-transfer
+  - indexed ASVP search now aggregates across yearly shard databases instead of querying one monolithic SQLite file
+  - if an older monolithic `storage/registry-index.db` still contains a successful legacy `asvp` index, read-path fallback stays available until a new shard rebuild completes
+  - this isolates the heaviest registry import from the shared court cache and reduces the chance that failed or oversized `asvp` rebuilds will bloat or block the main registry SQLite file
+  - explicit regression coverage now verifies that `ExternalDataService` downloads an `asvp` CSV and calls `rebuildIndexes({ source: "asvp" })`, which is the scheduled `data.gov.ua` auto-download entrypoint used by the worker
+  - the registry importer and source monitor now recurse into nested `split/` folders so streamed `asvp/split/*.csv` files are discovered automatically
+  - one-off helper scripts now load `.env` and `.env.local` directly, with `.env.local` taking precedence, so `npm run update:external-data` sees the same external-data settings as the main Nest runtime
+  - current live verification on `2026-03-22` confirmed the direct long-lived stream path repeatedly reset against `data.gov.ua`, and a single monolithic `curl --continue-at -` run still died with repeated `Recv failure: Connection reset by peer`; the chunked `Range` temp-archive path is now the operationally preferred route for the current `ASVP` source
+- Local storage cleanup completed in this session:
+  - removed the stale shared-db `ASVP` tables and compacted `storage/registry-index.db`
+  - pruned `../repo-history-backups/` down to only `rewrite-mirror-final-20260321.git`
+  - removed `asvp/28-ex_csv_asvp.csv`
+  - removed `storage/registry-index.pre-clean.backup.db`
+  - removed reproducible `tmp/` and `dist/`
+  - kept `node_modules/` and `.venv-pdf/` in place to avoid blocking ongoing local verification
+  - current local free space after cleanup is about `56 GiB`
+- Verification run in this session:
+  - `npm test -- --runInBand src/external-data/services/external-data.service.spec.ts` -> PASS
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts` -> PASS
+  - `npm test -- --runInBand src/registry-index/services/registry-index.source-monitor.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+
+### 2026-03-21 - Shared Registry Layer For Core Registries
+
+- Added a canonical shared registry UI layer in:
+  - `src/frontend/components/registry/RegistryLayout.tsx`
+  - `src/frontend/components/registry/RegistryLayout.css`
+  - `src/frontend/components/registry/index.ts`
+  - `src/frontend/components/index.ts`
+- Moved the core registries onto the shared filter-bar and surface/table-shell pattern in:
+  - `src/frontend/pages/clients/ClientsPage.tsx`
+  - `src/frontend/pages/clients/ClientsPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/calculations/CalculationsPage.tsx`
+  - `src/frontend/pages/calculations/CalculationsPage.css`
+  - `src/frontend/pages/documents/DocumentsPage.tsx`
+  - `src/frontend/pages/documents/DocumentsPage.css`
+- Current UI behavior now:
+  - clients, cases, calculations, and documents share one canonical registry card shell instead of keeping parallel page-local surface variants
+  - the four registries now use the same shared filter bar primitives for search, labeled date ranges, and aligned select/reset controls
+  - shared loading, empty, and pagination states now come from one registry layer for these screens instead of being redefined per page
+  - page-local CSS for those registries now focuses on module-specific layout and table content rather than generic filter/search/shell rules
+  - style leakage risk is lower because the reusable registry layer uses `registry-*` prefixed classes instead of generic selectors like `.filters-bar` and `.search-box`
+  - the documents registry now aligns structurally with the other registries while keeping its local view toggle and explorer/list behavior intact
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+- Remaining verification note:
+  - this refactor was code-reviewed and build-verified locally, but not visually previewed in a live browser during this session; desktop/tablet/mobile confirmation is still recommended for Clients, Cases, Calculations, and Documents around `1440px`, `1024px`, `768px`, and `390px`
+
+### 2026-03-21 - Documents Tablet Header Actions Follow-Up
+
+- Updated:
+  - `src/frontend/pages/documents/DocumentsPage.css`
+- Current UI behavior now:
+  - the documents page header switches to a dedicated tablet stack at `<=960px`
+  - page actions on the documents screen now use a controlled 2-column grid on tablet instead of wrapping into an awkward broken block
+  - the narrower mobile breakpoint still collapses those actions to a single column
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+  - focused manual/browser check of `/documents` with authenticated mocks at `1024px` and `768px` -> PASS
+  - no console/runtime errors were observed in the focused recheck
+
+### 2026-03-21 - Approved Frontend UI Consistency Pass
+
+- Updated the shared frontend shell and dense-screen ergonomics in:
+  - `src/frontend/components/navigation/Navigation.tsx`
+  - `src/frontend/components/FormActionBar.css`
+  - `src/frontend/components/DateRangePicker.css`
+  - `src/frontend/components/RecordActionsMenu.css`
+  - `src/frontend/pages/archive/ArchivePage.css`
+  - `src/frontend/pages/billing/BillingPage.tsx`
+  - `src/frontend/pages/billing/BillingPage.css`
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/calendar/CalendarPage.css`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/clients/AddClientPage.tsx`
+  - `src/frontend/pages/clients/ClientDetailsPage.tsx`
+  - `src/frontend/pages/clients/ClientsPage.css`
+  - `src/frontend/pages/clients/ClientsPage.tsx`
+  - `src/frontend/pages/dashboard/DashboardPage.tsx`
+  - `src/frontend/pages/documents/DocumentsPage.css`
+  - `src/frontend/pages/documents/MobileScanPage.css`
+  - `src/frontend/pages/notes/NotesPage.tsx`
+  - `src/frontend/pages/notes/NotesPage.css`
+  - `src/frontend/pages/profile/ProfilePage.tsx`
+  - `src/frontend/pages/profile/ProfilePage.css`
+  - `src/frontend/pages/calculations/CalculationsPage.css`
+- Current UI behavior now:
+  - breadcrumbs are page-level instead of being duplicated in the top navigation bar
+  - dashboard, client list, case list, add-client, calendar, billing, and profile now participate in the same page-shell orientation pattern
+  - client and case detail headers keep primary actions visible and move secondary actions into `RecordActionsMenu`
+  - notes use a stacked card-style mobile/tablet table fallback instead of a forced 720px horizontal-scroll table
+  - calendar week/month views switch to a compact list-first strategy on narrow screens instead of rendering the full wide grid
+  - `FormActionBar`, `DateRangePicker`, and `RecordActionsMenu` now have safer touch targets and less overflow-heavy behavior on narrow screens
+  - archive CSS now uses canonical frontend tokens instead of undefined variables
+  - billing and profile pages were aligned to the shared workspace/page-header shell and profile page-local CSS was reduced and re-scoped so it no longer exports broad generic form/button rules into other routes
+  - clients, cases, calculations, and documents registry filter bars now use closer control heights/radii and page-scoped selectors so route CSS is less likely to leak across registries after navigation
+  - the documents registry now has its own local filter-bar surface instead of implicitly inheriting another page's `.filters-bar` styling
+  - mobile scan cards now stack metadata/actions more safely on very narrow screens
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+- Remaining verification note:
+  - this pass was code-reviewed and build-verified locally, but not visually previewed in a live browser during this session; desktop/tablet/mobile confirmation is still recommended at roughly `1440px`, `1024px`, `768px`, and `390px`
+
+### 2026-03-21 - Registry Source Monitor Diagnostics + ASVP Error Preservation
+
+- Updated registry-index runtime diagnostics in:
+  - `src/registry-index/services/registry-index.source-monitor.service.ts`
+- Updated ASVP import preparation/runtime in:
+  - `src/registry-index/services/registry-source-import-preparation.ts`
+  - `src/registry-index/services/registry-index.service.ts`
+- Current behavior:
+  - when `RUN_SCHEDULED_JOBS=false`, bootstrap now checks `court_stan/`, `asvp/`, and `court_dates/`
+  - if CSV snapshots are already present, the app logs an explicit warning that automatic source monitoring is disabled in this process and that the dedicated worker or a manual `npm run build:registry-index -- --source=<source> --force` run is required
+  - oversized `asvp` CSV files now import directly from the original snapshot by default instead of pre-splitting into a full temporary UTF-8 duplicate tree
+  - ASVP writes are committed in smaller SQLite transactions during import, reducing both rollback blast radius and peak temp-disk pressure
+  - the old pre-split path still exists behind `ASVP_PRE_SPLIT_ENABLED=true` if it is explicitly needed for troubleshooting
+- Updated shared SQLite rollback handling in:
+  - `src/registry-index/services/registry-index.service.ts`
+  - rollback cleanup now skips no-op SQLite rollbacks instead of surfacing `cannot rollback - no transaction is active` as the apparent import failure
+  - ASVP import failures now preserve the real parse/import error in `import_state.last_error`
+- Added coverage in:
+  - `src/registry-index/services/registry-index.source-monitor.service.spec.ts`
+  - `src/registry-index/services/registry-source-import-preparation.spec.ts`
+  - `src/registry-index/services/registry-index.service.spec.ts`
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-source-import-preparation.spec.ts src/registry-index/services/registry-index.source-monitor.service.spec.ts src/registry-index/services/registry-index.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+
+### 2026-03-21 - Law Organizer UI Audit Skill Added
+
+- Added one repo-local Codex skill in:
+  - `.codex/skills/law-organizer-ui-audit/SKILL.md`
+- Skill purpose:
+  - audit Law Organizer screens for UI/UX consistency, operational usability, and responsive behavior without drifting into a redesign
+  - enforce approval before major layout, navigation, table-structure, form-structure, or cross-screen visual changes
+- Frontend audit findings captured for the skill:
+  - the active frontend stack is React 18 + Vite with custom CSS, shared tokens in `src/frontend/index.css`, and shared shell primitives such as `PageHeader`, `FormActionBar`, `RecordActionsMenu`, `DateRangePicker`, and the responsive navigation drawer
+  - list and form screens reuse similar patterns, but many modules still rely on page-local CSS for filters, tables, panels, and modal behavior
+  - filter bars, control heights, border radii, table responsiveness, and modal patterns are only partially standardized across modules such as clients, cases, calculations, documents, notes, archive, activity, and workspace/report surfaces
+  - at least one screen (`src/frontend/pages/archive/ArchivePage.css`) still uses non-canonical CSS variables such as `--border-color`, `--surface-color`, `--text-primary`, and `--text-secondary`, which do not match the main token set in `src/frontend/index.css`
+- No product UI was redesigned in this task; the change is limited to a reusable auditing skill plus context documentation.
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+
+### 2026-03-21 - Vite Chunking Warnings Removed
+
+- Updated frontend build chunking in:
+  - `vite.config.ts`
+- Current behavior:
+  - removed the previous circular manual-chunk relationship that produced the Vite warning `Circular chunk: vendor -> framework -> vendor`
+  - split large frontend dependencies into dedicated chunks for:
+    - framework
+    - router
+    - state
+    - forms
+    - http
+    - pdf-react
+    - pdf-core
+    - pdf-lib
+    - tinymce-core
+    - tinymce-react
+    - tinymce-model
+    - tinymce-theme
+    - tinymce-icons
+    - tinymce-plugins
+    - tinymce-skins
+    - docx-viewer
+    - file-viewer
+    - icons
+  - `npm run build:frontend` now completes without the previous circular-chunk warning and without the `Some chunks are larger than 500 kB after minification` warning
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+  - remaining build note:
+    - Vite still prints the existing CJS Node API deprecation notice before the build starts
+
+### 2026-03-21 - Event Archive Cascades + Calendar Archived Toggle
+
+- Added real `archived` status support for events in:
+  - `src/database/entities/Event.entity.ts`
+  - `src/events/dto/event.dto.ts`
+- Updated event queries in:
+  - `src/events/services/event.service.ts`
+  so archived events stay out of the normal calendar/event feeds unless `status=archived` is requested explicitly
+- Updated lifecycle cascades so linked calendar events now follow client/case archive and delete actions:
+  - `src/clients/services/client.service.ts`
+    - archiving a client archives linked non-deleted cases and their linked non-deleted events
+    - deleting a client soft-deletes linked non-deleted cases and their linked non-deleted events
+  - `src/cases/services/case.service.ts`
+    - archiving a case archives its linked non-deleted events
+    - deleting a case soft-deletes its linked non-deleted events
+- Registered the event repository for client-side cascades in:
+  - `src/clients/clients.module.ts`
+- Updated frontend event/archive behavior in:
+  - `src/frontend/pages/archive/ArchivePage.tsx`
+    - archive now shows archived events as a real category with data
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/calendar/CalendarPage.css`
+    - added `Показати архівні події` toggle
+    - when enabled, the calendar includes past events in the current view/list
+  - `src/frontend/services/event.service.ts`
+  - `src/frontend/types/event.types.ts`
+- Added coverage in:
+  - `src/clients/services/client.service.spec.ts`
+  - `src/cases/services/case.service.spec.ts`
+  - `src/events/services/event.service.spec.ts`
+
+Verification run in this session:
+- `npm test -- --runInBand src/clients/services/client.service.spec.ts src/cases/services/case.service.spec.ts src/events/services/event.service.spec.ts` -> PASS
+- `npm run build` -> PASS
+- `npm run build:frontend` -> PASS
+  - Vite still reports the existing circular/manual-chunk and large-chunk warnings
+
+### 2026-03-21 - Case Timeline Renamed To Case Events + court_stan Stage Merge
+
+- Updated the case event surfaces in:
+  - `src/cases/services/case.service.ts`
+  - `src/cases/services/case.service.spec.ts`
+  - `src/cases/services/case-registry-sync.service.ts`
+  - `src/frontend/pages/cases/CaseDetailsPage.tsx`
+  - `src/frontend/pages/cases/CaseDetailsPage.css`
+  - `src/frontend/pages/cases/CasesPage.tsx`
+  - `src/frontend/pages/cases/CasesPage.css`
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/types/case.types.ts`
+- Current behavior:
+  - the UI label `Timeline справи` is now `Події по справі`
+  - auto-created `court_dates` events no longer prepend the technical phrase about being created from `court_dates`
+  - case-event entries in the case timeline are clickable and now deep-link into `Календар`, opening the linked event on its date
+  - the case timeline now includes the latest `court_stan` stage as `Стадія розгляду` when it adds new meaning beyond the synced `court_dates` hearing
+  - `court_stan` stages that only restate the same hearing meaning as `court_dates` are suppressed, including the case where the hearing timestamp is embedded inside the stage title
+- Verification run in this session:
+  - `npm test -- --runInBand src/cases/services/case.service.spec.ts src/cases/services/case-registry-sync.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+    - Vite still reports the existing circular/manual-chunk and large-chunk warnings
+
+### 2026-03-21 - Calendar Participants Cleanup + Case Selector Labels
+
+- Updated:
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `src/frontend/pages/events/AddEventPage.tsx`
+- Current behavior:
+  - the calendar event details now suppress technical participant metadata such as `syncSource`, registry IDs, case IDs, and sync timestamps; synced court events show the actual `caseInvolved` text instead
+  - the event creation page now shows client-case options with both numbers when available: internal case number plus registry case number
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+    - Vite still reports the existing circular/manual-chunk and large-chunk warnings
 
 ### 2026-03-21 - Client Registry Search Overlay Fit And Autofill Flow
 
@@ -383,3 +810,18 @@ Recorded in repo history and reflected in modules:
   - this now covers both:
     - batch lookup by case numbers
     - FIO-driven suggestion resolution via indexed court-registry matches plus indexed `court_dates`
+  - expanded name matching so manual lookup can also resolve directly from indexed `court_dates` rows and tolerate alternate apostrophe variants in Ukrainian names
+
+### 2026-03-21 - Registry Hearing Preview Modal Before Event Creation
+
+- The manual "Знайти подію в реєстрі" flow now shows a modal preview instead of silently applying or immediately creating an event.
+- The case card action now opens an overlay with the found hearing details and a one-click "Додати подію" confirmation.
+- The add-event page now exposes the same behavior for the selected client or case:
+  - search nearest hearing in registry
+  - show the found result in a modal above the form
+  - create the `court_sitting` event only after explicit confirmation
+- This keeps registry-assisted creation fast while avoiding accidental event creation from ambiguous FIO matches.
+- Follow-up UX fix:
+  - deep links to `/calendar?eventId=...&date=...` no longer auto-open the calendar event modal
+  - the calendar now navigates to the requested date and visually highlights the target event card instead
+  - the manual case-card registry lookup now opens its preview even when the linked event already exists, and in that case the modal action routes the user to the calendar instead of creating a duplicate event

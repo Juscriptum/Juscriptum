@@ -7,6 +7,7 @@ This runbook favors operational clarity over “one command” optimism.
 - Node.js 20 and npm are the expected local runtime
 - Docker is optional but required for the containerized modes
 - The app loads `.env.local` first and then `.env`
+- Docker builds expect the checked-in `package-lock.json`; keep it present in the repo and in the Docker build context so the image build can use `npm ci`
 - Direct backend routes use `/v1`
 - `GET /health` and `GET /readiness` stay outside `/v1`
 - Frontend dev uses `/api` only as a proxy to backend `/v1`
@@ -45,6 +46,7 @@ npm run start:worker:dev
 ### Expected URLs
 
 - Frontend: `http://localhost:5173`
+- Platform-admin entry: `http://localhost:5173/platform-admin.html`
 - Backend health: `http://localhost:3000/health`
 - Backend readiness: `http://localhost:3000/readiness`
 - Direct backend API: `http://localhost:3000/v1/...`
@@ -60,6 +62,7 @@ Confirm:
 
 - health returns `200`
 - frontend loads on port `5173`
+- the separate platform-admin surface is reachable at `/platform-admin.html` for first-owner bootstrap, dedicated login, and MFA setup outside the tenant SPA
 - API requests from the frontend proxy reach backend `/v1`
 
 ### Caveats
@@ -68,6 +71,7 @@ Confirm:
 - This mode does not prove split web/worker behavior.
 - SQLite uses `synchronize: true`, which is a local convenience, not the production-like path.
 - `npm run start:dev` and `npm run start:all` set `RUN_SCHEDULED_JOBS=false`; use `npm run start:worker:dev` when you need scheduled/background processing locally.
+- `platform-admin.html` now supports first-owner bootstrap, dedicated login, MFA verification, MFA enrollment, and local safe dashboard/organizations read models, but it still does not include platform-admin audit tables or a PostgreSQL-proven privileged read path for tenant metadata.
 
 ## Mode 2: Full Local Container Stack
 
@@ -220,12 +224,16 @@ npm run build:registry-index
 npm run update:external-data -- --dry-run
 ```
 
+These helper scripts load `.env.local` and `.env` directly, with `.env.local` overriding `.env`, so one-off registry/external-data runs see the same URL settings as the main app runtime.
+
 Shared registry import notes:
 
-- `storage/registry-index.db` is a shared cross-user registry cache; it is not tenant-scoped
-- `npm run build:registry-index -- --source=court_stan|court_dates|asvp --force` now pre-splits oversized source CSVs into temporary year-based chunks before importing them into the shared SQLite index
-- by default, successfully imported `court_stan`, `court_dates`, and `asvp` source CSVs are deleted after the shared SQLite commit; drop a fresh full snapshot into the corresponding source directory before the next import cycle if you want to refresh the shared index
-- when a source directory is empty after a consumed import, the last successful shared SQLite index is kept instead of being cleared
+- `storage/registry-index.db` is the shared cross-user SQLite cache for `court_stan` and `court_dates`; it is not tenant-scoped
+- `storage/asvp-index.db` is the dedicated cross-user ASVP metadata/cache state SQLite database; it is also not tenant-scoped
+- `storage/asvp-index-shards/asvp-YYYY.db` stores the actual indexed ASVP rows in yearly SQLite shard files
+- `npm run build:registry-index -- --source=court_stan|court_dates|asvp --force` imports each source into its current cache layout; `ASVP` now reads either raw root CSVs or streamed year files from `asvp/split/asvp-YYYY.csv` and writes rows into yearly shard databases keyed by `VP_BEGINDATE`
+- by default, successfully imported `court_stan`, `court_dates`, and `asvp` source CSVs are deleted after the SQLite commit for their target cache; drop a fresh full snapshot into the corresponding source directory before the next import cycle if you want to refresh the index
+- when a source directory is empty after a consumed import, the last successful SQLite index for that source is kept instead of being cleared
 - tune chunking / cleanup with:
   - `COURT_STAN_PRE_SPLIT_MIN_BYTES`
   - `COURT_STAN_SPLIT_ROWS_PER_FILE`
@@ -236,9 +244,10 @@ Shared registry import notes:
   - `ASVP_PRE_SPLIT_MIN_BYTES`
   - `ASVP_SPLIT_ROWS_PER_FILE`
   - `ASVP_DELETE_IMPORTED_FILES=false`
-- auto-start triggers for shared registry imports:
+- auto-start triggers for registry imports and rebuilds:
   - on first startup when local source files are present and external-data URLs are not configured
   - on first startup through external-data bootstrap when external URLs are configured
+    this path now writes `ASVP` from `data.gov.ua` into `asvp/split/asvp-YYYY.csv`, triggers the yearly shard rebuild, and avoids keeping a full raw `ASVP` CSV in the workspace; for the current large ZIP payload it now prefers a temp archive assembled by resumable `Range` chunks in the OS temp directory and deletes that temp archive after the run
   - daily at `10:00` fixed `+01:00`
   - on new or changed CSV detection in `court_stan/`, `court_dates/`, or `asvp/` via the source monitor
 - tune the source monitor with:
