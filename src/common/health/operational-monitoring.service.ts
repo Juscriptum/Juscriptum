@@ -229,7 +229,10 @@ export class OperationalMonitoringService {
 
     const fileScanRepository = this.dataSource.getRepository(FileScanRecord);
     const trustRepository = this.dataSource.getRepository(TrustVerificationJob);
-    const outboxRepository = this.dataSource.getRepository(Outbox);
+    const hasOutboxMetadata = this.dataSource.hasMetadata(Outbox);
+    const outboxRepository = hasOutboxMetadata
+      ? this.dataSource.getRepository(Outbox)
+      : null;
     const subscriptionRepository = this.dataSource.getRepository(Subscription);
     const userRepository = this.dataSource.getRepository(User);
 
@@ -286,17 +289,21 @@ export class OperationalMonitoringService {
           scannedAt: MoreThan(last24Hours),
         },
       }),
-      outboxRepository.count({
-        where: {
-          processed: false,
-        },
-      }),
-      outboxRepository.count({
-        where: {
-          processed: false,
-          retryCount: MoreThanOrEqual(3),
-        },
-      }),
+      outboxRepository
+        ? outboxRepository.count({
+            where: {
+              processed: false,
+            },
+          })
+        : Promise.resolve(0),
+      outboxRepository
+        ? outboxRepository.count({
+            where: {
+              processed: false,
+              retryCount: MoreThanOrEqual(3),
+            },
+          })
+        : Promise.resolve(0),
     ]);
 
     return {
@@ -331,13 +338,14 @@ export class OperationalMonitoringService {
           infectedLast24h,
         },
         outbox: {
-          status:
-            outboxDeadLetterRisk > 0 ||
-            outboxPending >= OUTBOX_BACKLOG_THRESHOLD
+          status: hasOutboxMetadata
+            ? outboxDeadLetterRisk > 0 ||
+              outboxPending >= OUTBOX_BACKLOG_THRESHOLD
               ? "error"
               : outboxPending > 0
                 ? "degraded"
-                : "ok",
+                : "ok"
+            : "disabled",
           pending: outboxPending,
           deadLetterRisk: outboxDeadLetterRisk,
         },

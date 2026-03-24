@@ -7,10 +7,12 @@ import { Breadcrumbs } from "../../components/navigation";
 import { caseService } from "../../services/case.service";
 import { clientService } from "../../services/client.service";
 import documentService from "../../services/document.service";
+import { eventService } from "../../services/event.service";
 import pricelistService from "../../services/pricelist.service";
 import { Case } from "../../types/case.types";
 import { Client } from "../../types/client.types";
 import { Document } from "../../types/document.types";
+import { Event } from "../../types/event.types";
 import { Pricelist } from "../../types/pricelist.types";
 import { getClientDisplayName } from "../../utils/clientFormData";
 import {
@@ -74,6 +76,7 @@ export const ArchivePage: React.FC = () => {
   const [cases, setCases] = useState<Case[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [documents, setDocuments] = useState<Document[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [pricelists, setPricelists] = useState<Pricelist[]>([]);
   const [templates, setTemplates] = useState<TemplateRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -95,6 +98,7 @@ export const ArchivePage: React.FC = () => {
         casesResponse,
         clientsResponse,
         documentsResponse,
+        eventsResponse,
         pricelistsResponse,
       ] = await Promise.all([
         caseService.getCases({
@@ -115,6 +119,12 @@ export const ArchivePage: React.FC = () => {
           sortBy: "updatedAt",
           sortOrder: "DESC",
         }),
+        eventService.getEvents({
+          status: "archived",
+          limit: ARCHIVE_LIMIT,
+          sortBy: "updatedAt",
+          sortOrder: "DESC",
+        }),
         pricelistService.getPricelists({
           status: "archived",
           limit: ARCHIVE_LIMIT,
@@ -126,6 +136,7 @@ export const ArchivePage: React.FC = () => {
       setCases(casesResponse.data);
       setClients(clientsResponse.data);
       setDocuments(documentsResponse.data);
+      setEvents(eventsResponse.data);
       setPricelists(pricelistsResponse.data);
       setTemplates(
         sortTemplates(
@@ -163,8 +174,8 @@ export const ArchivePage: React.FC = () => {
         id: "events",
         label: "Події",
         description: "Архів календарних подій",
-        count: 0,
-        supported: false,
+        count: events.length,
+        supported: true,
       },
       {
         id: "pricelists",
@@ -206,17 +217,12 @@ export const ArchivePage: React.FC = () => {
       cases.length,
       clients.length,
       documents.length,
+      events.length,
       pricelists.length,
       templates.length,
     ],
   );
 
-  const totalArchived = useMemo(
-    () => tabs.reduce((sum, tab) => sum + tab.count, 0),
-    [tabs],
-  );
-
-  const supportedTabs = tabs.filter((tab) => tab.supported).length;
   const activeTabConfig = tabs.find((tab) => tab.id === activeTab) || tabs[0];
 
   const handleTabChange = (tabId: ArchiveTabId) => {
@@ -478,11 +484,51 @@ export const ArchivePage: React.FC = () => {
           </section>
         );
       case "events":
-        return renderUnsupportedPanel(
-          "Архів подій",
-          "Тут будуть зібрані архівні календарні події за категорією.",
-          "До календаря",
-          "/calendar",
+        return (
+          <section
+            className="archive-panel"
+            role="tabpanel"
+            id="archive-panel-events"
+            aria-labelledby="archive-tab-events"
+          >
+            <div className="archive-panel-header">
+              <div>
+                <h3>Архівні події</h3>
+                <p>
+                  Календарні події, пов'язані з архівованими клієнтами та
+                  справами
+                </p>
+              </div>
+              <Link to="/calendar" className="btn btn-outline">
+                До календаря
+              </Link>
+            </div>
+            <div className="archive-list">
+              {events.map((event) => (
+                <Link
+                  key={event.id}
+                  to="/calendar"
+                  className="archive-list-item"
+                >
+                  <div>
+                    <strong>{event.title}</strong>
+                    <span>
+                      {formatDate(event.eventDate)}{" "}
+                      {event.eventTime
+                        ? `• ${event.eventTime.slice(0, 5)}`
+                        : ""}
+                    </span>
+                  </div>
+                  <span className="archive-item-meta">{event.status}</span>
+                </Link>
+              ))}
+              {events.length === 0 && (
+                <div className="archive-empty-state">
+                  У архіві поки немає подій.
+                </div>
+              )}
+            </div>
+          </section>
         );
       case "calculations":
         return renderUnsupportedPanel(
@@ -521,29 +567,6 @@ export const ArchivePage: React.FC = () => {
       />
 
       {error && <Alert type="error">{error}</Alert>}
-
-      <div className="archive-summary-grid">
-        <div className="archive-summary-card">
-          <span>Усього в архіві</span>
-          <strong>{totalArchived}</strong>
-          <small>У всіх категоріях зі статусом архіву</small>
-        </div>
-        <div className="archive-summary-card">
-          <span>Категорій</span>
-          <strong>{tabs.length}</strong>
-          <small>Окремі вкладки для навігації</small>
-        </div>
-        <div className="archive-summary-card">
-          <span>Готові модулі</span>
-          <strong>{supportedTabs}</strong>
-          <small>Категорії вже показують реальні архівні дані</small>
-        </div>
-        <div className="archive-summary-card">
-          <span>Поточна вкладка</span>
-          <strong>{activeTabConfig.count}</strong>
-          <small>{activeTabConfig.description}</small>
-        </div>
-      </div>
 
       <section className="archive-tabs-panel">
         <div

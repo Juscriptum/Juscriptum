@@ -1,10 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { Alert } from "../../components/Alert";
+import { ContactText } from "../../components/ContactText";
 import { PageHeader } from "../../components/PageHeader";
+import { Breadcrumbs } from "../../components/navigation";
 import { Spinner } from "../../components/Spinner";
 import { eventService } from "../../services/event.service";
 import { Event } from "../../types/event.types";
+import { formatCaseReferenceLabel } from "../../utils/caseFormat";
 import "../workspace/WorkspacePage.css";
 import "./CalendarPage.css";
 
@@ -12,6 +15,7 @@ type CalendarView = "day" | "week" | "month" | "year";
 
 type CalendarEvent = {
   id: string;
+  sourceEventId: string;
   title: string;
   time: string;
   sortTime: string;
@@ -19,7 +23,7 @@ type CalendarEvent = {
   participants: string;
   createdAt: string;
   client: string;
-  deal: string;
+  caseLabel: string;
   additionalInfo: string;
   date: Date;
   location: string;
@@ -202,8 +206,55 @@ function toIsoRange(
 
 function normalizeParticipants(event: Event): string {
   if (event.participants && typeof event.participants === "object") {
-    const values = Object.values(event.participants)
-      .flatMap((value) => (Array.isArray(value) ? value : [value]))
+    const participantMap = event.participants as Record<string, unknown>;
+    const labels = Array.isArray(participantMap.labels)
+      ? participantMap.labels.filter(
+          (value): value is string =>
+            typeof value === "string" && value.trim().length > 0,
+        )
+      : [];
+
+    if (labels.length > 0) {
+      return labels.join(", ");
+    }
+
+    if (typeof participantMap.caseInvolved === "string") {
+      const caseInvolved = participantMap.caseInvolved.trim();
+
+      if (caseInvolved.length > 0) {
+        return caseInvolved;
+      }
+    }
+
+    const technicalKeys = new Set([
+      "syncSource",
+      "registryCaseNumber",
+      "caseNumber",
+      "caseId",
+      "syncedAt",
+      "id",
+      "type",
+      "email",
+      "phone",
+    ]);
+    const values = Object.entries(participantMap)
+      .filter(([key]) => !technicalKeys.has(key))
+      .flatMap(([, value]) => {
+        if (Array.isArray(value)) {
+          return value;
+        }
+
+        if (value && typeof value === "object") {
+          const nestedName =
+            typeof (value as Record<string, unknown>).name === "string"
+              ? (value as Record<string, unknown>).name
+              : null;
+
+          return nestedName ? [nestedName] : [];
+        }
+
+        return [value];
+      })
       .filter(
         (value): value is string =>
           typeof value === "string" && value.trim().length > 0,
@@ -326,6 +377,7 @@ function createCalendarEntries(
 
         entries.push({
           id: `${event.id}::${key}::${formatDate(itemDate)}`,
+          sourceEventId: event.id,
           title: event.title,
           time: getTimeLabel(event.eventTime, event.isAllDay),
           sortTime: event.eventTime ? event.eventTime.slice(0, 5) : "09:00",
@@ -333,7 +385,7 @@ function createCalendarEntries(
           participants,
           createdAt: formatCreatedAt(event.createdAt),
           client: event.case?.title || event.case?.caseNumber || "Не вказано",
-          deal: event.case?.caseNumber || event.type,
+          caseLabel: formatCaseReferenceLabel(event.case),
           additionalInfo,
           date: itemDate,
           location: event.location || "Не вказано",
@@ -396,6 +448,12 @@ function filterBySearch(
   );
 }
 
+function getStartOfToday(): Date {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
 function groupByDate(
   events: CalendarEvent[],
 ): Array<{ key: string; date: Date; events: CalendarEvent[] }> {
@@ -451,8 +509,12 @@ export const CalendarPage: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [currentView, setCurrentView] = useState<CalendarView>("day");
+  const [isCompactCalendar, setIsCompactCalendar] = useState(() =>
+    typeof window !== "undefined" ? window.innerWidth <= 768 : false,
+  );
   const [currentDate, setCurrentDate] = useState(() => new Date());
   const [globalSearch, setGlobalSearch] = useState("");
+  const [showArchivedEvents, setShowArchivedEvents] = useState(false);
   const [daySearch, setDaySearch] = useState("");
   const [weekFilters, setWeekFilters] = useState<PaginatedState>(() =>
     DEFAULT_PAGE_STATE(getStartOfWeek(new Date()), getEndOfWeek(new Date())),
@@ -468,6 +530,14 @@ export const CalendarPage: React.FC = () => {
     null,
   );
   const [refreshKey, setRefreshKey] = useState(0);
+  const deepLinkedEventId = useMemo(
+    () => new URLSearchParams(location.search).get("eventId") || "",
+    [location.search],
+  );
+  const deepLinkedDate = useMemo(
+    () => new URLSearchParams(location.search).get("date") || "",
+    [location.search],
+  );
 
   const fetchRange = useMemo(
     () => toIsoRange(currentView, currentDate),
@@ -525,6 +595,26 @@ export const CalendarPage: React.FC = () => {
   }, [fetchRange.end, fetchRange.start, refreshKey]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia("(max-width: 768px)");
+    const applyMatch = (matches: boolean) => setIsCompactCalendar(matches);
+    applyMatch(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      applyMatch(event.matches);
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
     const weekStart = getStartOfWeek(currentDate);
     const weekEnd = getEndOfWeek(currentDate);
 
@@ -548,9 +638,77 @@ export const CalendarPage: React.FC = () => {
     setSelectedEvent(null);
   }, [location.key]);
 
+  useEffect(() => {
+    if (!deepLinkedDate) {
+      return;
+    }
+
+    const targetDate = new Date(deepLinkedDate);
+
+    if (Number.isNaN(targetDate.getTime())) {
+      return;
+    }
+
+    setCurrentDate(targetDate);
+    setCurrentView("day");
+  }, [deepLinkedDate]);
+
+  useEffect(() => {
+    if (!deepLinkedEventId || events.length === 0) {
+      return;
+    }
+
+    const targetDate = deepLinkedDate ? new Date(deepLinkedDate) : null;
+    const matchedEvent =
+      events.find(
+        (event) =>
+          event.sourceEventId === deepLinkedEventId &&
+          (!targetDate || isSameDay(event.date, targetDate)),
+      ) || events.find((event) => event.sourceEventId === deepLinkedEventId);
+
+    if (!matchedEvent) {
+      return;
+    }
+
+    setCurrentDate(matchedEvent.date);
+    setCurrentView("day");
+  }, [deepLinkedDate, deepLinkedEventId, events]);
+
+  useEffect(() => {
+    if (!deepLinkedEventId || events.length === 0) {
+      return;
+    }
+
+    const targetDate = deepLinkedDate ? new Date(deepLinkedDate) : null;
+    const matchedEvent =
+      events.find(
+        (event) =>
+          event.sourceEventId === deepLinkedEventId &&
+          (!targetDate || isSameDay(event.date, targetDate)),
+      ) || events.find((event) => event.sourceEventId === deepLinkedEventId);
+
+    if (!matchedEvent) {
+      return;
+    }
+
+    const elementId = `calendar-event-${matchedEvent.sourceEventId}-${formatDate(matchedEvent.date)}`;
+
+    window.requestAnimationFrame(() => {
+      document
+        .getElementById(elementId)
+        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+    });
+  }, [deepLinkedDate, deepLinkedEventId, events]);
+
   const globallyFilteredEvents = useMemo(
-    () => filterBySearch(events, globalSearch),
-    [events, globalSearch],
+    () =>
+      filterBySearch(
+        showArchivedEvents
+          ? events
+          : events.filter((event) => event.date >= getStartOfToday()),
+        globalSearch,
+      ),
+    [events, globalSearch, showArchivedEvents],
   );
 
   const eventsMap = useMemo(() => {
@@ -727,7 +885,8 @@ export const CalendarPage: React.FC = () => {
     <button
       key={`${event.id}-${withDate ? formatDate(event.date) : "day"}`}
       type="button"
-      className="event-card"
+      id={`calendar-event-${event.sourceEventId}-${formatDate(event.date)}`}
+      className={`event-card ${event.sourceEventId === deepLinkedEventId ? "event-card--target" : ""}`}
       onClick={() => setSelectedEvent(event)}
     >
       <div className="event-time">
@@ -786,6 +945,7 @@ export const CalendarPage: React.FC = () => {
 
   return (
     <div className="workspace-page calendar-page">
+      <Breadcrumbs />
       <PageHeader
         title="Календар"
         subtitle="Події, дедлайни та зустрічі в одному робочому ритмі"
@@ -845,6 +1005,16 @@ export const CalendarPage: React.FC = () => {
                 />
                 <span className="search-icon">Пошук</span>
               </div>
+              <label className="calendar-archive-toggle">
+                <input
+                  type="checkbox"
+                  checked={showArchivedEvents}
+                  onChange={(event) =>
+                    setShowArchivedEvents(event.target.checked)
+                  }
+                />
+                <span>Показати архівні події</span>
+              </label>
             </div>
           </div>
         </div>
@@ -971,73 +1141,84 @@ export const CalendarPage: React.FC = () => {
                 </div>
               </div>
             </div>
-            <div className="week-header">
-              <div>Час</div>
-              {weekDays.map((day, index) => (
-                <button
-                  key={formatDate(day)}
-                  type="button"
-                  className="week-day-header"
-                  onClick={() => {
-                    setCurrentDate(day);
-                    setCurrentView("day");
-                  }}
-                >
-                  <div className="day-of-week">{WEEKDAY_SHORT[index]}</div>
-                  <div
-                    className="day-number-large"
-                    style={
-                      isSameDay(day, new Date())
-                        ? { color: "#4285f4" }
-                        : undefined
-                    }
-                  >
-                    {day.getDate()}
-                  </div>
-                </button>
-              ))}
-            </div>
-            <div className="week-grid">
-              {HOURS.map((hour) => (
-                <React.Fragment key={hour}>
-                  <div className="time-slot">{`${hour}:00`}</div>
-                  {weekDays.map((day) => {
-                    const dayKey = formatDate(day);
-                    const slotEvents = (eventsMap[dayKey] || []).filter(
-                      (event) => Number(event.time.split(":")[0]) === hour,
-                    );
-
-                    return (
-                      <button
-                        key={`${dayKey}-${hour}`}
-                        type="button"
-                        className={`day-slot ${isSameDay(day, new Date()) ? "current-day" : ""}`}
-                        onClick={() => {
-                          setCurrentDate(day);
-                          setCurrentView("day");
-                        }}
+            {isCompactCalendar ? (
+              <div className="calendar-compact-hint">
+                На вузьких екранах тижневий режим показує список подій замість
+                часової сітки, щоб календар залишався придатним для touch.
+              </div>
+            ) : (
+              <>
+                <div className="week-header">
+                  <div>Час</div>
+                  {weekDays.map((day, index) => (
+                    <button
+                      key={formatDate(day)}
+                      type="button"
+                      className="week-day-header"
+                      onClick={() => {
+                        setCurrentDate(day);
+                        setCurrentView("day");
+                      }}
+                    >
+                      <div className="day-of-week">{WEEKDAY_SHORT[index]}</div>
+                      <div
+                        className="day-number-large"
+                        style={
+                          isSameDay(day, new Date())
+                            ? { color: "#4285f4" }
+                            : undefined
+                        }
                       >
-                        {slotEvents.map((event) => (
-                          <span
-                            key={event.id}
-                            className="event-week"
-                            onClick={(clickEvent) => {
-                              clickEvent.stopPropagation();
-                              setSelectedEvent(event);
+                        {day.getDate()}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                <div className="week-grid">
+                  {HOURS.map((hour) => (
+                    <React.Fragment key={hour}>
+                      <div className="time-slot">{`${hour}:00`}</div>
+                      {weekDays.map((day) => {
+                        const dayKey = formatDate(day);
+                        const slotEvents = (eventsMap[dayKey] || []).filter(
+                          (event) => Number(event.time.split(":")[0]) === hour,
+                        );
+
+                        return (
+                          <button
+                            key={`${dayKey}-${hour}`}
+                            type="button"
+                            className={`day-slot ${isSameDay(day, new Date()) ? "current-day" : ""}`}
+                            onClick={() => {
+                              setCurrentDate(day);
+                              setCurrentView("day");
                             }}
                           >
-                            {event.time} {event.title}
-                          </span>
-                        ))}
-                      </button>
-                    );
-                  })}
-                </React.Fragment>
-              ))}
-            </div>
+                            {slotEvents.map((event) => (
+                              <span
+                                key={event.id}
+                                className="event-week"
+                                onClick={(clickEvent) => {
+                                  clickEvent.stopPropagation();
+                                  setSelectedEvent(event);
+                                }}
+                              >
+                                {event.time} {event.title}
+                              </span>
+                            ))}
+                          </button>
+                        );
+                      })}
+                    </React.Fragment>
+                  ))}
+                </div>
+              </>
+            )}
 
             <div className="week-events-section">
-              <h3>Усі події тижня</h3>
+              <h3>
+                {isCompactCalendar ? "Список подій тижня" : "Усі події тижня"}
+              </h3>
 
               <div className="week-events-filters">
                 <input
@@ -1226,44 +1407,55 @@ export const CalendarPage: React.FC = () => {
               </div>
             </div>
 
-            <div className="calendar-header">
-              {WEEKDAY_FULL.map((day) => (
-                <div key={day}>{day}</div>
-              ))}
-            </div>
+            {isCompactCalendar ? (
+              <div className="calendar-compact-hint">
+                На вузьких екранах місячний режим спрощено до списку подій за
+                період. Для детального перегляду відкрийте конкретний день.
+              </div>
+            ) : (
+              <>
+                <div className="calendar-header">
+                  {WEEKDAY_FULL.map((day) => (
+                    <div key={day}>{day}</div>
+                  ))}
+                </div>
 
-            <div className="calendar-grid">
-              {monthDays.map((day) => {
-                const dayKey = formatDate(day);
-                const hasEvents = (eventsMap[dayKey] || []).length > 0;
+                <div className="calendar-grid">
+                  {monthDays.map((day) => {
+                    const dayKey = formatDate(day);
+                    const hasEvents = (eventsMap[dayKey] || []).length > 0;
 
-                return (
-                  <button
-                    key={dayKey}
-                    type="button"
-                    className={`day-cell ${day.getMonth() !== currentDate.getMonth() ? "other-month" : ""}`}
-                    onClick={() => {
-                      setCurrentDate(day);
-                      setCurrentView("day");
-                    }}
-                  >
-                    <div
-                      className={`day-number ${hasEvents ? "has-event" : ""}`}
-                      style={
-                        isSameDay(day, new Date())
-                          ? { color: "#4285f4" }
-                          : undefined
-                      }
-                    >
-                      {day.getDate()}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+                    return (
+                      <button
+                        key={dayKey}
+                        type="button"
+                        className={`day-cell ${day.getMonth() !== currentDate.getMonth() ? "other-month" : ""}`}
+                        onClick={() => {
+                          setCurrentDate(day);
+                          setCurrentView("day");
+                        }}
+                      >
+                        <div
+                          className={`day-number ${hasEvents ? "has-event" : ""}`}
+                          style={
+                            isSameDay(day, new Date())
+                              ? { color: "#4285f4" }
+                              : undefined
+                          }
+                        >
+                          {day.getDate()}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </>
+            )}
 
             <div className="week-events-section">
-              <h3>Усі події місяця</h3>
+              <h3>
+                {isCompactCalendar ? "Список подій місяця" : "Усі події місяця"}
+              </h3>
 
               <div className="week-events-filters">
                 <input
@@ -1522,8 +1714,10 @@ export const CalendarPage: React.FC = () => {
                   </div>
                 </div>
                 <div className="event-detail-row">
-                  <div className="event-detail-label">Угода:</div>
-                  <div className="event-detail-value">{selectedEvent.deal}</div>
+                  <div className="event-detail-label">Справа:</div>
+                  <div className="event-detail-value">
+                    {selectedEvent.caseLabel}
+                  </div>
                 </div>
                 <div className="event-detail-row">
                   <div className="event-detail-label">Учасники:</div>
@@ -1542,7 +1736,7 @@ export const CalendarPage: React.FC = () => {
                     Контакти відповідальної особи:
                   </div>
                   <div className="event-detail-value">
-                    {selectedEvent.responsibleContact}
+                    <ContactText value={selectedEvent.responsibleContact} />
                   </div>
                 </div>
                 <div className="event-detail-row">

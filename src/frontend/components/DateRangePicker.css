@@ -121,7 +121,7 @@
 
 .date-range-picker__select,
 .date-range-picker__shortcut {
-    min-height: var(--control-height-sm);
+    min-height: var(--control-height-md);
     border: 1px solid rgba(20, 32, 51, 0.09);
     border-radius: 0.85rem;
     background: #ffffff;
@@ -155,8 +155,8 @@
 }
 
 .date-range-picker__nav {
-    width: 1.68rem;
-    height: 1.68rem;
+    width: 2rem;
+    height: 2rem;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -185,9 +185,9 @@
 }
 
 .date-range-picker__day {
-    min-height: 1.55rem;
+    min-height: 2rem;
     border: none;
-    border-radius: 0.46rem;
+    border-radius: 0.6rem;
     background: #f8fbff;
     color: var(--color-ink-900);
     cursor: pointer;
@@ -237,13 +237,24 @@
 
 @media (max-width: 768px) {
     .date-range-picker__popover {
-        width: min(calc(100vw - 2rem), 19rem);
+        width: min(calc(100vw - 1.5rem), 20rem);
         min-width: 0;
+        padding: 0.75rem;
     }
 
     .date-range-picker__summary,
     .date-range-picker__selectors {
         grid-template-columns: 1fr;
+    }
+
+    .date-range-picker__nav {
+        width: 2.25rem;
+        height: 2.25rem;
+    }
+
+    .date-range-picker__day {
+        min-height: 2.35rem;
+        font-size: var(--text-sm);
     }
 
     .date-range-picker__footer {

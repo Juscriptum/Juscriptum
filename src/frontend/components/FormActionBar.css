@@ -45,9 +45,36 @@
     min-width: max-content;
 }
 
+.form-action-bar__actions > * {
+    flex: 0 0 auto;
+}
+
 @media (max-width: 768px) {
     .form-action-bar {
         bottom: 5.5rem;
         padding: 0.65rem 0.75rem;
+        flex-direction: column;
+        align-items: stretch;
+        overflow: visible;
+    }
+
+    .form-action-bar__meta {
+        width: 100%;
+    }
+
+    .form-action-bar__meta strong {
+        white-space: normal;
+    }
+
+    .form-action-bar__actions {
+        width: 100%;
+        flex: 1 1 auto;
+        flex-wrap: wrap;
+        justify-content: stretch;
+        min-width: 0;
+    }
+
+    .form-action-bar__actions > * {
+        flex: 1 1 100%;
     }
 }

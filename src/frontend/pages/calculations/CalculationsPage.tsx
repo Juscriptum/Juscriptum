@@ -6,6 +6,13 @@ import { Breadcrumbs } from "../../components/navigation";
 import { PageHeader } from "../../components/PageHeader";
 import { RecordActionsMenu } from "../../components/RecordActionsMenu";
 import { Spinner } from "../../components/Spinner";
+import {
+  RegistryFilterBar,
+  RegistryFilterGroup,
+  RegistrySearchField,
+  RegistrySurface,
+  RegistryTableShell,
+} from "../../components/registry";
 import { calculationService } from "../../services/calculation.service";
 import { caseService } from "../../services/case.service";
 import { clientService } from "../../services/client.service";
@@ -482,34 +489,15 @@ export const CalculationsPage: React.FC = () => {
         </Alert>
       )}
 
-      <section className="calculations-registry">
-        <div className="filters-bar calculations-filters">
-          <div className="search-box">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Пошук по номеру, клієнту, опису чи справі..."
-              value={registryFilters.search}
-              onChange={(event) =>
-                applyRegistryFilters({
-                  search: event.target.value,
-                })
-              }
-            />
-          </div>
+      <RegistrySurface className="calculations-registry">
+        <RegistryFilterBar className="calculations-filters">
+          <RegistrySearchField
+            placeholder="Пошук по номеру, клієнту, опису чи справі..."
+            value={registryFilters.search}
+            onChange={(search) => applyRegistryFilters({ search })}
+          />
 
-          <div className="filters-date-range">
-            <span className="filters-date-range__label">Дата розрахунку</span>
+          <RegistryFilterGroup label="Дата розрахунку">
             <DateRangePicker
               fromValue={registryFilters.dateFrom}
               toValue={registryFilters.dateTo}
@@ -518,7 +506,7 @@ export const CalculationsPage: React.FC = () => {
               }
               onToChange={(value) => applyRegistryFilters({ dateTo: value })}
             />
-          </div>
+          </RegistryFilterGroup>
 
           <select
             value={registryFilters.operationType}
@@ -589,7 +577,7 @@ export const CalculationsPage: React.FC = () => {
           >
             Скинути
           </button>
-        </div>
+        </RegistryFilterBar>
 
         <div className="calculations-registry-toolbar">
           <div className="calculations-registry-copy">
@@ -619,7 +607,7 @@ export const CalculationsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="calculations-table">
+        <RegistryTableShell className="calculations-table">
           <table>
             <thead>
               <tr>
@@ -836,8 +824,8 @@ export const CalculationsPage: React.FC = () => {
               Розрахунків за обраними фільтрами поки немає.
             </div>
           )}
-        </div>
-      </section>
+        </RegistryTableShell>
+      </RegistrySurface>
     </div>
   );
 };

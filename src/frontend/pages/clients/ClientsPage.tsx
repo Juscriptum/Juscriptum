@@ -2,11 +2,21 @@ import React, { useState, useEffect } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import clientService from "../../services/client.service";
 import { Client, ClientFilters, ClientStatus } from "../../types/client.types";
-import { Spinner } from "../../components/Spinner";
 import { Alert } from "../../components/Alert";
 import { PageHeader } from "../../components/PageHeader";
+import { Breadcrumbs } from "../../components/navigation";
 import { DateRangePicker } from "../../components/DateRangePicker";
 import { RecordActionsMenu } from "../../components/RecordActionsMenu";
+import {
+  RegistryEmptyState,
+  RegistryFilterBar,
+  RegistryFilterGroup,
+  RegistryLoadingState,
+  RegistryPagination,
+  RegistrySearchField,
+  RegistrySurface,
+  RegistryTableShell,
+} from "../../components/registry";
 import "./ClientsPage.css";
 
 /**
@@ -165,6 +175,7 @@ export const ClientsPage: React.FC = () => {
 
   return (
     <div className="clients-page">
+      <Breadcrumbs />
       <PageHeader
         title="Мої клієнти"
         subtitle="Клієнтський реєстр для всієї практики: контакти, статуси і швидкий перехід до пов’язаних справ"
@@ -193,29 +204,14 @@ export const ClientsPage: React.FC = () => {
         <Alert type="error" message={error} onClose={() => setError(null)} />
       )}
 
-      <section className="clients-registry">
-        <div className="filters-bar">
-          <div className="search-box">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Пошук клієнтів..."
-              value={filters.search || ""}
-              onChange={(e) => handleSearch(e.target.value)}
-            />
-          </div>
-          <div className="filters-date-range">
-            <span className="filters-date-range__label">Дата створення</span>
+      <RegistrySurface className="clients-registry">
+        <RegistryFilterBar className="clients-registry-filters">
+          <RegistrySearchField
+            placeholder="Пошук клієнтів..."
+            value={filters.search || ""}
+            onChange={handleSearch}
+          />
+          <RegistryFilterGroup label="Дата створення">
             <DateRangePicker
               fromValue={filters.createdAtFrom}
               toValue={filters.createdAtTo}
@@ -227,7 +223,7 @@ export const ClientsPage: React.FC = () => {
               }
               max={todayIso}
             />
-          </div>
+          </RegistryFilterGroup>
           <select
             value={filters.type || ""}
             onChange={(e) =>
@@ -258,39 +254,41 @@ export const ClientsPage: React.FC = () => {
           >
             Скинути
           </button>
-        </div>
+        </RegistryFilterBar>
 
         {loading ? (
-          <div className="loading-container">
-            <Spinner size="large" />
-          </div>
+          <RegistryLoadingState />
         ) : clients.length === 0 ? (
-          <div className="empty-state">
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-            </svg>
-            <h3>Клієнтів не знайдено</h3>
-            <p>Додайте першого клієнта, щоб почати роботу</p>
-            <button
-              className="btn btn-primary"
-              onClick={() => navigate("/clients/add")}
-            >
-              Додати клієнта
-            </button>
-          </div>
+          <RegistryEmptyState
+            icon={
+              <svg
+                width="64"
+                height="64"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            }
+            title="Клієнтів не знайдено"
+            description="Додайте першого клієнта, щоб почати роботу"
+            action={
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate("/clients/add")}
+              >
+                Додати клієнта
+              </button>
+            }
+          />
         ) : (
           <>
-            <div className="clients-table">
+            <RegistryTableShell className="clients-table">
               <table>
                 <thead>
                   <tr>
@@ -388,32 +386,20 @@ export const ClientsPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
-            </div>
+            </RegistryTableShell>
 
             {totalPages > 1 && (
-              <div className="pagination">
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === 1}
-                  onClick={() => handlePageChange(page - 1)}
-                >
-                  Попередня
-                </button>
-                <span className="page-info">
-                  Сторінка {page} з {totalPages} ({total} записів)
-                </span>
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === totalPages}
-                  onClick={() => handlePageChange(page + 1)}
-                >
-                  Наступна
-                </button>
-              </div>
+              <RegistryPagination
+                page={page}
+                totalPages={totalPages}
+                totalItems={total}
+                onPrevious={() => handlePageChange(page - 1)}
+                onNext={() => handlePageChange(page + 1)}
+              />
             )}
           </>
         )}
-      </section>
+      </RegistrySurface>
     </div>
   );
 };

@@ -501,7 +501,6 @@ export class CaseRegistrySyncService {
 
   private buildEventDescription(match: CourtDateSearchResult): string {
     return [
-      "Автоматично створено з файлу `court_dates`.",
       `Опис справи: ${match.caseDescription || "не вказано"}`,
       `Учасники: ${match.caseInvolved || "не вказано"}`,
     ].join("\n");

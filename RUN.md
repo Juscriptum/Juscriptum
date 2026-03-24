@@ -12,6 +12,37 @@ This runbook favors operational clarity over “one command” optimism.
 - `GET /health` and `GET /readiness` stay outside `/v1`
 - Frontend dev uses `/api` only as a proxy to backend `/v1`
 
+## Local/VPS Sync Rule
+
+Treat the local machine and the VPS as two copies of one operational system.
+
+- If you change runtime behavior, deployment config, env shape, startup flow, storage mounts, worker/web split, cron behavior, or registry/external-data paths locally, make the corresponding VPS change too.
+- If you hotfix or adjust those same operational pieces directly on the VPS, bring the required equivalent changes back into the local repo and docs immediately after.
+- Do not allow the VPS to become a “special” undocumented version that only exists on the server.
+- When the user has explicitly provided live VPS access in the current session and wants a live visible result, treat local and VPS completion as one workflow:
+  - make the local repo change
+  - apply the matching VPS change
+  - rebuild/restart only the affected surface
+  - verify the live result with a real probe when feasible
+- Never store plaintext server passwords, tokens, or private keys in repo files or docs; use them only as transient session access.
+- Keep these artifacts synchronized when relevant:
+  - repo code
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - nginx config
+  - worker/web startup commands
+  - storage mount assumptions
+  - `.env.example` / `.env.staging.example` / documented env keys
+  - runbooks and deployment notes
+- Allowed differences are only machine-specific values and generated state:
+  - secrets
+  - hostnames/IPs
+  - certificates
+  - local caches
+  - SQLite data files
+  - logs
+  - other reproducible/generated artifacts
+
 ## Mode 1: Fast Local Mode
 
 Use this when you need the fastest edit/run loop.
@@ -56,6 +87,8 @@ npm run start:worker:dev
 ```bash
 curl http://localhost:3000/health
 curl http://localhost:3000/readiness
+curl http://localhost:8080/api/health
+curl http://localhost:8080/api/readiness
 ```
 
 Confirm:
@@ -122,6 +155,8 @@ Confirm:
 
 - health returns `200`
 - readiness returns `200`
+- frontend `/api/health` proxies to backend `/health`
+- frontend `/api/readiness` proxies to backend `/readiness`
 - frontend loads on port `8080`
 - background jobs are handled by `redis-worker`, not by the web container
 
@@ -129,10 +164,14 @@ Confirm:
 
 - The worker service name is historical. It is not a BullMQ/Redis queue worker.
 - The current worker is a dedicated Nest context that polls DB-backed jobs on a schedule.
+- Fresh empty PostgreSQL bootstrap is currently incomplete from migrations alone.
+  - For a brand-new empty Postgres database, the current live workaround is a one-time backend boot with `DB_SYNC=true` so TypeORM creates the base schema, then return `DB_SYNC=false` for normal runtime.
 - The checked-in `nginx-proxy` service is not repo-complete because these paths are missing:
   - `nginx.prod.conf`
   - `ssl/`
 - Because of that, do not use `nginx-proxy` as the default local entrypoint from this repo.
+- The frontend container proxies backend traffic through Docker DNS.
+  - This is intentional so recreating the backend container does not leave nginx pinned to a stale bridge-network IP and cause `502 Bad Gateway` for `/api/*`.
 
 ## Mode 3: Near-Production Rehearsal
 
@@ -231,8 +270,11 @@ Shared registry import notes:
 - `storage/registry-index.db` is the shared cross-user SQLite cache for `court_stan` and `court_dates`; it is not tenant-scoped
 - `storage/asvp-index.db` is the dedicated cross-user ASVP metadata/cache state SQLite database; it is also not tenant-scoped
 - `storage/asvp-index-shards/asvp-YYYY.db` stores the actual indexed ASVP rows in yearly SQLite shard files
+- `storage/asvp-index-shards.build/` is the resumable staging directory used while a large ASVP rebuild is still in progress
+- in Docker/VPS deployments, bind-mount `./storage` into `/app/storage` for both web and worker containers; otherwise the containers will boot with a fresh empty registry cache and registry search will return no real results even if the host already has populated SQLite indexes
+- once `court_dates` has already been imported into `storage/registry-index.db`, missing raw `court_dates/` source files should no longer crash hearing suggestion/search flows in indexed deployments; those paths now return empty results and log a warning instead
 - `npm run build:registry-index -- --source=court_stan|court_dates|asvp --force` imports each source into its current cache layout; `ASVP` now reads either raw root CSVs or streamed year files from `asvp/split/asvp-YYYY.csv` and writes rows into yearly shard databases keyed by `VP_BEGINDATE`
-- by default, successfully imported `court_stan`, `court_dates`, and `asvp` source CSVs are deleted after the SQLite commit for their target cache; drop a fresh full snapshot into the corresponding source directory before the next import cycle if you want to refresh the index
+- by default, successfully imported `court_stan`, `court_dates`, and `asvp` source CSVs are deleted after the SQLite commit for their target cache; for `ASVP` yearly split files this cleanup now also happens progressively during rebuild so completed year files free disk before the whole import finishes
 - when a source directory is empty after a consumed import, the last successful SQLite index for that source is kept instead of being cleared
 - tune chunking / cleanup with:
   - `COURT_STAN_PRE_SPLIT_MIN_BYTES`

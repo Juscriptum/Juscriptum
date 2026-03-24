@@ -1,0 +1,39 @@
+services:
+  backend:
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      PLATFORM_ADMIN_JWT_SECRET: ${PLATFORM_ADMIN_JWT_SECRET}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      minio:
+        condition: service_started
+    volumes:
+      - ./storage:/app/storage
+    deploy:
+      replicas: 1
+
+  frontend:
+    ports:
+      - "127.0.0.1:8080:8080"
+    deploy:
+      replicas: 1
+
+  redis-worker:
+    environment:
+      PLATFORM_ADMIN_JWT_SECRET: ${PLATFORM_ADMIN_JWT_SECRET}
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASSWORD: ${SMTP_PASSWORD}
+    volumes:
+      - ./storage:/app/storage
+    deploy:
+      replicas: 1

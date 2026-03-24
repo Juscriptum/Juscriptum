@@ -2,7 +2,7 @@ import { Injectable, Logger, OnModuleDestroy, Optional } from "@nestjs/common";
 import * as crypto from "crypto";
 import Database = require("better-sqlite3");
 import { createReadStream } from "fs";
-import { mkdir, readdir, rm, stat } from "fs/promises";
+import { mkdir, readdir, rename, rm, stat, unlink } from "fs/promises";
 import * as iconv from "iconv-lite";
 import * as path from "path";
 import * as readline from "readline";
@@ -15,15 +15,24 @@ import {
 } from "./registry-source-import-preparation";
 import {
   ASVP_SOURCE_LABEL,
+  COURT_DATES_SOURCE_LABEL,
   COURT_REGISTRY_SOURCE_LABEL,
 } from "../../clients/services/court-registry.service";
 import type {
+  CourtDateSearchOptions,
   CourtDateSearchResult,
   CourtRegistrySearchOptions,
   CourtRegistrySearchResult,
 } from "../../clients/services/court-registry.service";
 
 type ImportSourceCode = "court_stan" | "asvp" | "court_dates";
+type RegistryIndexDatabaseKind = "shared" | "asvp";
+
+interface RegistryIndexServiceOptions {
+  sharedDbPath?: string;
+  asvpDbPath?: string;
+  asvpShardDirectory?: string;
+}
 
 export interface ImportStateRecord {
   source_code: string;
@@ -42,7 +51,24 @@ export interface ImportStateRecord {
   rows_imported?: number | null;
 }
 
+export interface RegistryImportStateSummary {
+  sourceCode: ImportSourceCode;
+  sourceLabel: string;
+  available: boolean;
+  datasetUrl: string | null;
+  resourceName: string | null;
+  resourceUrl: string | null;
+  remoteUpdatedAt: string | null;
+  lastDownloadedAt: string | null;
+  lastIndexedAt: string | null;
+  lastSuccessAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  rowsImported: number;
+}
+
 interface SqliteDatabase {
+  inTransaction?: boolean;
   pragma(value: string): unknown;
   exec(sql: string): unknown;
   prepare(sql: string): {
@@ -96,21 +122,79 @@ interface CourtDateRow {
   case_description: string;
 }
 
+interface AsvpShardDbEntry {
+  bucketKey: string;
+  db: SqliteDatabase;
+  fileName: string;
+  filePath: string;
+}
+
+interface AsvpShardBuildContext {
+  bucketKey: string;
+  db: SqliteDatabase;
+  filePath: string;
+  insertRow: {
+    run: (...params: any[]) => any;
+  };
+  insertFts: {
+    run: (...params: any[]) => any;
+  };
+  rowId: number;
+  rowsImported: number;
+  pendingTransactionRows: number;
+  transactionOpen: boolean;
+}
+
 @Injectable()
 export class RegistryIndexService implements OnModuleDestroy {
   private readonly logger = new Logger(RegistryIndexService.name);
-  private readonly dbPath: string;
+  private readonly sharedDbPath: string;
+  private readonly asvpDbPath: string;
+  private readonly asvpShardDirectory: string;
+  private readonly asvpShardBuildDirectory: string;
   private readonly courtStanDirectory: string;
   private readonly asvpDirectory: string;
   private readonly courtDatesDirectory: string;
   private readonly batchSize: number;
   private readonly deleteImportedSourceFiles: Record<ImportSourceCode, boolean>;
   private readonly sourceRebuilds = new Map<ImportSourceCode, Promise<void>>();
-  private db: SqliteDatabase | null = null;
+  private sharedDb: SqliteDatabase | null = null;
+  private asvpDb: SqliteDatabase | null = null;
+  private readonly asvpShardDbs = new Map<string, SqliteDatabase>();
 
-  constructor(@Optional() dbPath?: string) {
-    this.dbPath =
-      dbPath || path.resolve(process.cwd(), "storage", "registry-index.db");
+  constructor(
+    @Optional() dbPathOrOptions?: string | RegistryIndexServiceOptions,
+  ) {
+    if (typeof dbPathOrOptions === "string") {
+      this.sharedDbPath = dbPathOrOptions;
+      this.asvpDbPath = path.join(
+        path.dirname(dbPathOrOptions),
+        "asvp-index.db",
+      );
+      this.asvpShardDirectory = path.join(
+        path.dirname(dbPathOrOptions),
+        "asvp-index-shards",
+      );
+      this.asvpShardBuildDirectory = path.join(
+        path.dirname(dbPathOrOptions),
+        "asvp-index-shards.build",
+      );
+    } else {
+      this.sharedDbPath =
+        dbPathOrOptions?.sharedDbPath ||
+        path.resolve(process.cwd(), "storage", "registry-index.db");
+      this.asvpDbPath =
+        dbPathOrOptions?.asvpDbPath ||
+        path.resolve(process.cwd(), "storage", "asvp-index.db");
+      this.asvpShardDirectory =
+        dbPathOrOptions?.asvpShardDirectory ||
+        path.resolve(process.cwd(), "storage", "asvp-index-shards");
+      this.asvpShardBuildDirectory = path.join(
+        path.dirname(this.asvpShardDirectory),
+        "asvp-index-shards.build",
+      );
+    }
+
     this.courtStanDirectory = path.resolve(process.cwd(), "court_stan");
     this.asvpDirectory = path.resolve(process.cwd(), "asvp");
     this.courtDatesDirectory = path.resolve(process.cwd(), "court_dates");
@@ -123,150 +207,40 @@ export class RegistryIndexService implements OnModuleDestroy {
   }
 
   onModuleDestroy(): void {
-    this.db?.close();
-    this.db = null;
+    this.sharedDb?.close();
+    this.asvpDb?.close();
+    this.closeAsvpShardDbs();
+    this.sharedDb = null;
+    this.asvpDb = null;
   }
 
   async ensureInitialized(): Promise<void> {
-    if (this.db) {
+    if (this.sharedDb && this.asvpDb) {
       return;
     }
 
-    await mkdir(path.dirname(this.dbPath), { recursive: true });
-    const database = new Database(this.dbPath) as unknown as SqliteDatabase;
+    if (!this.sharedDb) {
+      this.sharedDb = await this.initializeDatabase(
+        this.sharedDbPath,
+        "shared",
+      );
+    }
+    if (!this.asvpDb) {
+      this.asvpDb = await this.initializeDatabase(this.asvpDbPath, "asvp");
+    }
+  }
+
+  private async initializeDatabase(
+    dbPath: string,
+    kind: RegistryIndexDatabaseKind,
+  ): Promise<SqliteDatabase> {
+    await mkdir(path.dirname(dbPath), { recursive: true });
+    const database = new Database(dbPath) as unknown as SqliteDatabase;
     database.pragma("journal_mode = WAL");
     database.pragma("synchronous = NORMAL");
     database.pragma("temp_store = MEMORY");
     database.pragma("busy_timeout = 5000");
-    database.exec(`
-      CREATE TABLE IF NOT EXISTS court_registry_participants (
-        id INTEGER PRIMARY KEY,
-        case_number TEXT,
-        case_number_normalized TEXT,
-        participant_raw TEXT,
-        participant_normalized TEXT,
-        participant_role TEXT NULL,
-        court_name TEXT,
-        case_proc TEXT,
-        registration_date TEXT,
-        judge TEXT,
-        judges TEXT,
-        stage_date TEXT,
-        stage_name TEXT,
-        record_type TEXT,
-        case_description TEXT,
-        participants TEXT,
-        source_file TEXT,
-        source_row_num INTEGER NULL,
-        import_batch_id TEXT,
-        created_at TEXT,
-        updated_at TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_court_registry_case_number
-        ON court_registry_participants(case_number_normalized);
-      CREATE INDEX IF NOT EXISTS idx_court_registry_participant_normalized
-        ON court_registry_participants(participant_normalized);
-      CREATE VIRTUAL TABLE IF NOT EXISTS court_registry_participants_fts
-        USING fts5(
-          participant_raw,
-          participant_normalized,
-          content='court_registry_participants',
-          content_rowid='id',
-          tokenize='unicode61'
-        );
-
-      CREATE TABLE IF NOT EXISTS asvp_records (
-        id INTEGER PRIMARY KEY,
-        vp_ordernum TEXT,
-        debtor_name TEXT,
-        debtor_name_normalized TEXT,
-        creditor_name TEXT,
-        creditor_name_normalized TEXT,
-        org_name TEXT,
-        org_name_normalized TEXT,
-        vp_begindate TEXT,
-        vp_state TEXT,
-        dvs_code TEXT,
-        phone_num TEXT,
-        email_addr TEXT,
-        bank_account TEXT,
-        source_file TEXT,
-        source_row_num INTEGER NULL,
-        import_batch_id TEXT,
-        created_at TEXT,
-        updated_at TEXT
-      );
-      CREATE INDEX IF NOT EXISTS idx_asvp_vp_ordernum
-        ON asvp_records(vp_ordernum);
-      CREATE INDEX IF NOT EXISTS idx_asvp_debtor_name_normalized
-        ON asvp_records(debtor_name_normalized);
-      CREATE INDEX IF NOT EXISTS idx_asvp_creditor_name_normalized
-        ON asvp_records(creditor_name_normalized);
-      CREATE INDEX IF NOT EXISTS idx_asvp_org_name_normalized
-        ON asvp_records(org_name_normalized);
-      CREATE VIRTUAL TABLE IF NOT EXISTS asvp_records_fts
-        USING fts5(
-          debtor_name,
-          debtor_name_normalized,
-          creditor_name,
-          creditor_name_normalized,
-          org_name,
-          org_name_normalized,
-          content='asvp_records',
-          content_rowid='id',
-          tokenize='unicode61'
-        );
-
-      CREATE TABLE IF NOT EXISTS court_dates (
-        id INTEGER PRIMARY KEY,
-        case_number TEXT,
-        case_number_normalized TEXT,
-        date TEXT,
-        judges TEXT,
-        court_name TEXT,
-        court_room TEXT,
-        case_involved TEXT,
-        case_description TEXT,
-        source_file TEXT,
-        source_row_num INTEGER NULL,
-        import_batch_id TEXT,
-        created_at TEXT,
-        updated_at TEXT
-      );
-      DROP INDEX IF EXISTS idx_court_dates_case_number;
-      CREATE INDEX IF NOT EXISTS idx_court_dates_case_number
-        ON court_dates(case_number_normalized);
-
-      CREATE TABLE IF NOT EXISTS import_state (
-        source_code TEXT PRIMARY KEY,
-        dataset_url TEXT,
-        resource_name TEXT,
-        resource_url TEXT,
-        remote_updated_at TEXT NULL,
-        remote_fingerprint TEXT NULL,
-        local_file_hash TEXT NULL,
-        extracted_hash TEXT NULL,
-        last_downloaded_at TEXT NULL,
-        last_indexed_at TEXT NULL,
-        last_success_at TEXT NULL,
-        last_status TEXT,
-        last_error TEXT NULL,
-        rows_imported INTEGER DEFAULT 0
-      );
-
-      CREATE TABLE IF NOT EXISTS import_batches (
-        id TEXT PRIMARY KEY,
-        source_code TEXT,
-        started_at TEXT,
-        finished_at TEXT NULL,
-        status TEXT,
-        downloaded INTEGER,
-        extracted INTEGER,
-        indexed INTEGER,
-        rows_processed INTEGER DEFAULT 0,
-        error_message TEXT NULL
-      );
-    `);
+    database.exec(this.buildSchemaSql(kind));
     const importStateColumns = (
       database.prepare(`PRAGMA table_info(import_state)`).all() as Array<{
         name?: string;
@@ -282,17 +256,25 @@ export class RegistryIndexService implements OnModuleDestroy {
     }
 
     await this.migrateLegacyRegistrySchema(database);
-    this.db = database;
+    return database;
   }
 
   async getImportState(sourceCode: string): Promise<ImportStateRecord | null> {
     await this.ensureInitialized();
 
-    const row = this.getDb()
+    const primaryRow = this.getDbForSourceCode(sourceCode)
       .prepare(`SELECT * FROM import_state WHERE source_code = ? LIMIT 1`)
       .get(sourceCode) as ImportStateRecord | undefined;
 
-    return row ?? null;
+    if (primaryRow || sourceCode !== "asvp") {
+      return primaryRow ?? null;
+    }
+
+    return (
+      (this.getSharedDb()
+        .prepare(`SELECT * FROM import_state WHERE source_code = ? LIMIT 1`)
+        .get(sourceCode) as ImportStateRecord | undefined) ?? null
+    );
   }
 
   async upsertImportState(
@@ -301,7 +283,9 @@ export class RegistryIndexService implements OnModuleDestroy {
   ): Promise<void> {
     await this.ensureInitialized();
 
-    const current = (await this.getImportState(sourceCode)) ?? {
+    const current = (this.getDbForSourceCode(sourceCode)
+      .prepare(`SELECT * FROM import_state WHERE source_code = ? LIMIT 1`)
+      .get(sourceCode) as ImportStateRecord | undefined) ?? {
       source_code: sourceCode,
     };
 
@@ -311,7 +295,7 @@ export class RegistryIndexService implements OnModuleDestroy {
       source_code: sourceCode,
     };
 
-    this.getDb()
+    this.getDbForSourceCode(sourceCode)
       .prepare(
         `
         INSERT INTO import_state (
@@ -364,17 +348,69 @@ export class RegistryIndexService implements OnModuleDestroy {
       );
   }
 
+  async getImportStateSummaries(): Promise<RegistryImportStateSummary[]> {
+    const sourceCodes: ImportSourceCode[] = [
+      "court_stan",
+      "court_dates",
+      "asvp",
+    ];
+
+    return Promise.all(
+      sourceCodes.map(async (sourceCode) => {
+        const [state, available] = await Promise.all([
+          this.getImportState(sourceCode),
+          this.isIndexAvailableFor(sourceCode),
+        ]);
+
+        return {
+          sourceCode,
+          sourceLabel: this.getImportSourceLabel(sourceCode),
+          available,
+          datasetUrl: state?.dataset_url ?? null,
+          resourceName: state?.resource_name ?? null,
+          resourceUrl: state?.resource_url ?? null,
+          remoteUpdatedAt: state?.remote_updated_at ?? null,
+          lastDownloadedAt: state?.last_downloaded_at ?? null,
+          lastIndexedAt: state?.last_indexed_at ?? null,
+          lastSuccessAt: state?.last_success_at ?? null,
+          lastStatus: state?.last_status ?? null,
+          lastError: state?.last_error ?? null,
+          rowsImported: state?.rows_imported ?? 0,
+        };
+      }),
+    );
+  }
+
   async isIndexAvailableFor(source: ImportSourceCode): Promise<boolean> {
     await this.ensureInitialized();
-    const row = this.getDb()
-      .prepare(
-        `SELECT last_status, rows_imported FROM import_state WHERE source_code = ?`,
-      )
-      .get(source) as
-      | { last_status?: string; rows_imported?: number }
-      | undefined;
 
-    return Boolean(row && row.last_status === "success" && row.rows_imported);
+    if (
+      source !== "asvp" &&
+      this.isIndexAvailableInDb(this.getPrimaryDbForSource(source), source)
+    ) {
+      return true;
+    }
+
+    if (source === "asvp") {
+      if (await this.isPrimaryAsvpIndexAvailable()) {
+        return true;
+      }
+
+      return this.isLegacyAsvpIndexAvailable();
+    }
+
+    return false;
+  }
+
+  private getImportSourceLabel(source: ImportSourceCode): string {
+    switch (source) {
+      case "court_stan":
+        return COURT_REGISTRY_SOURCE_LABEL;
+      case "court_dates":
+        return COURT_DATES_SOURCE_LABEL;
+      case "asvp":
+        return ASVP_SOURCE_LABEL;
+    }
   }
 
   async rebuildIndexes(options?: {
@@ -393,20 +429,21 @@ export class RegistryIndexService implements OnModuleDestroy {
       );
     }
 
-    this.compactWriteAheadLogIfPossible();
+    this.compactWriteAheadLogIfPossible(sources);
   }
 
   async searchCourtRegistry(
     options: CourtRegistrySearchOptions,
   ): Promise<CourtRegistrySearchResult[]> {
     await this.ensureInitialized();
+    const db = this.getSharedDb();
 
     if (!(await this.isIndexAvailableFor("court_stan"))) {
       return [];
     }
 
     const normalizedQuery = this.normalizeSearchValue(options.query || "");
-    const rows = this.queryCourtRegistryRows(options, normalizedQuery);
+    const rows = this.queryCourtRegistryRows(db, options, normalizedQuery);
 
     return rows
       .filter((row) =>
@@ -441,13 +478,24 @@ export class RegistryIndexService implements OnModuleDestroy {
     options: CourtRegistrySearchOptions,
   ): Promise<CourtRegistrySearchResult[]> {
     await this.ensureInitialized();
+    const shardEntries = await this.getAsvpShardDbEntries(options);
+    const legacyDb = shardEntries.length === 0 ? this.getLegacyAsvpDb() : null;
 
-    if (!(await this.isIndexAvailableFor("asvp"))) {
+    if (shardEntries.length === 0 && !legacyDb) {
       return [];
     }
 
     const normalizedQuery = this.normalizeSearchValue(options.query || "");
-    const rows = this.queryAsvpRows(options, normalizedQuery);
+    const rows =
+      shardEntries.length > 0
+        ? shardEntries.flatMap((entry) =>
+            this.queryAsvpRows(entry.db, options, normalizedQuery),
+          )
+        : this.queryAsvpRows(
+            legacyDb as SqliteDatabase,
+            options,
+            normalizedQuery,
+          );
 
     const results: CourtRegistrySearchResult[] = [];
 
@@ -529,12 +577,13 @@ export class RegistryIndexService implements OnModuleDestroy {
     caseNumber: string,
   ): Promise<CourtDateSearchResult | null> {
     await this.ensureInitialized();
+    const db = this.getSharedDb();
 
     if (!(await this.isIndexAvailableFor("court_dates"))) {
       return null;
     }
 
-    const row = this.getDb()
+    const row = db
       .prepare(
         `
         SELECT
@@ -569,15 +618,97 @@ export class RegistryIndexService implements OnModuleDestroy {
     };
   }
 
+  async searchCourtDates(
+    options: CourtDateSearchOptions,
+  ): Promise<CourtDateSearchResult[]> {
+    await this.ensureInitialized();
+    const db = this.getSharedDb();
+
+    if (!(await this.isIndexAvailableFor("court_dates"))) {
+      return [];
+    }
+
+    const rawQuery = (options.query || "").trim();
+    const normalizedCaseNumber = this.normalizeCaseNumber(
+      options.caseNumber || "",
+    );
+
+    if (!rawQuery && !normalizedCaseNumber) {
+      return [];
+    }
+
+    const queryVariants = this.buildSearchQueryVariants(rawQuery);
+    const likeVariants = queryVariants.map((query) => `%${query}%`);
+    const queryClause =
+      likeVariants.length > 0
+        ? likeVariants
+            .map(
+              () => `
+                case_involved LIKE ?
+                OR case_description LIKE ?
+                OR court_name LIKE ?
+                OR judges LIKE ?
+                OR case_number LIKE ?
+              `,
+            )
+            .join(" OR ")
+        : "1 = 1";
+    const queryParameters = likeVariants.flatMap((query) => [
+      query,
+      query,
+      query,
+      query,
+      query,
+    ]);
+    const rows = db
+      .prepare(
+        `
+        SELECT
+          case_number,
+          date,
+          judges,
+          court_name,
+          court_room,
+          case_involved,
+          case_description
+        FROM court_dates
+        WHERE
+          (? = '' OR case_number_normalized = ?)
+          AND (
+            ? = ''
+            OR ${queryClause}
+          )
+        LIMIT 200
+        `,
+      )
+      .all(
+        normalizedCaseNumber,
+        normalizedCaseNumber,
+        rawQuery,
+        ...queryParameters,
+      ) as Array<Record<string, string>>;
+
+    return rows.map((row) => ({
+      date: row.date || "",
+      judges: row.judges || "",
+      caseNumber: row.case_number || "",
+      courtName: row.court_name || "",
+      courtRoom: row.court_room || "",
+      caseInvolved: row.case_involved || "",
+      caseDescription: row.case_description || "",
+    }));
+  }
+
   private async rebuildSource(
     source: ImportSourceCode,
     force: boolean,
   ): Promise<void> {
+    const db = this.getPrimaryDbForSource(source);
     const files = await this.listSourceFiles(source);
-    const currentState = this.getDb()
+    const currentState = db
       .prepare(
         `
-        SELECT extracted_hash, last_status, rows_imported
+        SELECT extracted_hash, last_status, rows_imported, last_success_at
         FROM import_state
         WHERE source_code = ?
         LIMIT 1
@@ -588,16 +719,18 @@ export class RegistryIndexService implements OnModuleDestroy {
           extracted_hash?: string;
           last_status?: string;
           rows_imported?: number;
+          last_success_at?: string;
         }
       | undefined;
+    const hasCurrentIndex = await this.hasPersistedIndexForSource(
+      source,
+      currentState,
+    );
 
     if (files.length === 0) {
-      if (
-        currentState?.last_status === "success" &&
-        (currentState.rows_imported || 0) > 0
-      ) {
+      if (hasCurrentIndex) {
         this.logger.log(
-          `Skipping ${source} index rebuild: no source files found, keeping existing shared index`,
+          `Skipping ${source} index rebuild: no source files found, keeping existing index`,
         );
         return;
       }
@@ -609,7 +742,12 @@ export class RegistryIndexService implements OnModuleDestroy {
     const signature = await this.computeDirectorySignature(files);
 
     if (!force && currentState?.extracted_hash === signature) {
-      await this.cleanupUnchangedSourceFiles(source, files, currentState);
+      await this.cleanupUnchangedSourceFiles(
+        source,
+        files,
+        currentState,
+        hasCurrentIndex,
+      );
       this.logger.log(
         `Skipping ${source} index rebuild: source files unchanged`,
       );
@@ -618,15 +756,13 @@ export class RegistryIndexService implements OnModuleDestroy {
 
     const batchId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
-    this.getDb()
-      .prepare(
-        `
+    db.prepare(
+      `
         INSERT INTO import_batches (
           id, source_code, started_at, status, downloaded, extracted, indexed, rows_processed
         ) VALUES (?, ?, ?, ?, 0, 0, 0, 0)
         `,
-      )
-      .run(batchId, source, startedAt, "running");
+    ).run(batchId, source, startedAt, "running");
 
     try {
       let rowsImported = 0;
@@ -640,9 +776,8 @@ export class RegistryIndexService implements OnModuleDestroy {
       }
 
       const finishedAt = new Date().toISOString();
-      this.getDb()
-        .prepare(
-          `
+      db.prepare(
+        `
           INSERT INTO import_state (
             source_code,
             extracted_hash,
@@ -659,31 +794,20 @@ export class RegistryIndexService implements OnModuleDestroy {
             last_error = NULL,
             rows_imported = excluded.rows_imported
           `,
-        )
-        .run(
-          source,
-          signature,
-          finishedAt,
-          finishedAt,
-          "success",
-          rowsImported,
-        );
-      this.getDb()
-        .prepare(
-          `
+      ).run(source, signature, finishedAt, finishedAt, "success", rowsImported);
+      db.prepare(
+        `
           UPDATE import_batches
           SET finished_at = ?, status = ?, indexed = 1, rows_processed = ?
           WHERE id = ?
           `,
-        )
-        .run(finishedAt, "success", rowsImported, batchId);
+      ).run(finishedAt, "success", rowsImported, batchId);
       this.logger.log(`Rebuilt ${source} index with ${rowsImported} rows`);
     } catch (error) {
       const finishedAt = new Date().toISOString();
       const message = error instanceof Error ? error.message : String(error);
-      this.getDb()
-        .prepare(
-          `
+      db.prepare(
+        `
           INSERT INTO import_state (
             source_code,
             extracted_hash,
@@ -697,17 +821,14 @@ export class RegistryIndexService implements OnModuleDestroy {
             last_status = excluded.last_status,
             last_error = excluded.last_error
           `,
-        )
-        .run(source, signature, finishedAt, "failed", message);
-      this.getDb()
-        .prepare(
-          `
+      ).run(source, signature, finishedAt, "failed", message);
+      db.prepare(
+        `
           UPDATE import_batches
           SET finished_at = ?, status = ?, error_message = ?
           WHERE id = ?
           `,
-        )
-        .run(finishedAt, "failed", message, batchId);
+      ).run(finishedAt, "failed", message, batchId);
       throw error;
     }
   }
@@ -717,7 +838,7 @@ export class RegistryIndexService implements OnModuleDestroy {
     batchId: string,
   ): Promise<number> {
     const importPlan = await prepareSourceImportPlan("court_stan", files);
-    const db = this.getDb();
+    const db = this.getSharedDb();
     let rowsImported = 0;
 
     try {
@@ -822,61 +943,36 @@ export class RegistryIndexService implements OnModuleDestroy {
 
   private async rebuildAsvp(files: string[], batchId: string): Promise<number> {
     const importPlan = await prepareSourceImportPlan("asvp", files);
-    const db = this.getDb();
+    const metadataDb = this.getAsvpDb();
+    const buildRoot = this.asvpShardBuildDirectory;
+    await mkdir(buildRoot, { recursive: true });
+    const shardContexts = new Map<string, AsvpShardBuildContext>();
     let rowsImported = 0;
     const now = new Date().toISOString();
-
-    const insertRow = db.prepare(
-      `
-      INSERT INTO asvp_records (
-        vp_ordernum,
-        debtor_name,
-        debtor_name_normalized,
-        creditor_name,
-        creditor_name_normalized,
-        org_name,
-        org_name_normalized,
-        vp_begindate,
-        vp_state,
-        dvs_code,
-        phone_num,
-        email_addr,
-        bank_account,
-        source_file,
-        source_row_num,
-        import_batch_id,
-        created_at,
-        updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `,
+    const transactionRowLimit = Math.max(
+      Number(
+        process.env.ASVP_INSERT_ROWS_PER_TRANSACTION ||
+          process.env.ASVP_SPLIT_ROWS_PER_FILE ||
+          "5000",
+      ),
+      1,
     );
-    const insertFts = db.prepare(
-      `
-      INSERT INTO asvp_records_fts (
-        rowid,
-        debtor_name,
-        debtor_name_normalized,
-        creditor_name,
-        creditor_name_normalized,
-        org_name,
-        org_name_normalized
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
-      `,
-    );
-
     try {
-      db.exec("BEGIN IMMEDIATE");
-      db.prepare(`DELETE FROM asvp_records_fts`).run();
-      db.prepare(`DELETE FROM asvp_records`).run();
-      db.exec("COMMIT");
-
-      let rowId = 0;
-
       for (const preparedFile of importPlan.files) {
         let sourceRowNum = 0;
         let fileRowsImported = 0;
+        const touchedBucketKeys = new Set<string>();
+        const resetBucketKey = this.parseAsvpBucketKeyFromSourceFileName(
+          path.basename(preparedFile.filePath),
+        );
 
-        db.exec("BEGIN IMMEDIATE");
+        if (resetBucketKey) {
+          await this.resetAsvpShardBuildBucket(
+            shardContexts,
+            buildRoot,
+            resetBucketKey,
+          );
+        }
 
         try {
           for await (const row of this.readDelimitedRows<AsvpRegistryRow>(
@@ -887,12 +983,25 @@ export class RegistryIndexService implements OnModuleDestroy {
             },
           )) {
             sourceRowNum += 1;
-            rowId += 1;
+            const bucketKey = this.extractAsvpBucketKey(row.VP_BEGINDATE || "");
+            const shardContext = this.getOrCreateAsvpShardBuildContext(
+              shardContexts,
+              buildRoot,
+              bucketKey,
+            );
+            touchedBucketKeys.add(bucketKey);
+
+            if (!shardContext.transactionOpen) {
+              shardContext.db.exec("BEGIN IMMEDIATE");
+              shardContext.transactionOpen = true;
+            }
+
+            shardContext.rowId += 1;
             const debtorName = (row.DEBTOR_NAME || "").trim();
             const creditorName = (row.CREDITOR_NAME || "").trim();
             const orgName = (row.ORG_NAME || "").trim();
 
-            insertRow.run(
+            shardContext.insertRow.run(
               row.VP_ORDERNUM || "",
               debtorName,
               this.normalizeSearchValue(debtorName),
@@ -912,41 +1021,60 @@ export class RegistryIndexService implements OnModuleDestroy {
               now,
               now,
             );
-            insertFts.run(
-              rowId,
-              debtorName,
+            shardContext.insertFts.run(
+              shardContext.rowId,
               this.normalizeSearchValue(debtorName),
-              creditorName,
               this.normalizeSearchValue(creditorName),
-              orgName,
               this.normalizeSearchValue(orgName),
             );
             fileRowsImported += 1;
+            shardContext.rowsImported += 1;
+            shardContext.pendingTransactionRows += 1;
+
+            if (shardContext.pendingTransactionRows >= transactionRowLimit) {
+              rowsImported += this.commitAsvpShardTransaction(shardContext);
+              this.updateImportBatchRowsProcessed(
+                metadataDb,
+                batchId,
+                rowsImported,
+              );
+            }
           }
 
-          db.exec("COMMIT");
+          rowsImported += this.commitOpenAsvpShardTransactions(shardContexts);
+          this.updateImportBatchRowsProcessed(
+            metadataDb,
+            batchId,
+            rowsImported,
+          );
         } catch (error) {
-          this.rollbackTransaction(db, "asvp chunk rebuild");
+          this.rollbackOpenAsvpShardTransactions(shardContexts);
+          this.updateImportBatchRowsProcessed(
+            metadataDb,
+            batchId,
+            rowsImported,
+          );
           throw error;
         }
-
-        rowsImported += fileRowsImported;
-        this.getDb()
-          .prepare(
-            `
-            UPDATE import_batches
-            SET rows_processed = ?
-            WHERE id = ?
-            `,
-          )
-          .run(rowsImported, batchId);
 
         this.logger.log(
           `Imported ${fileRowsImported} ASVP rows from ${path.basename(preparedFile.filePath)} (${rowsImported} total)`,
         );
+
+        this.closeAsvpShardBuildContexts(shardContexts, touchedBucketKeys);
+        await this.deleteImportedAsvpPreparedFileIfConfigured(
+          importPlan,
+          preparedFile.filePath,
+        );
       }
+
+      rowsImported += this.commitOpenAsvpShardTransactions(shardContexts);
+      this.updateImportBatchRowsProcessed(metadataDb, batchId, rowsImported);
+      this.closeAsvpShardBuildContexts(shardContexts);
+      await this.replaceAsvpShardDirectory(buildRoot);
     } catch (error) {
-      this.rollbackTransaction(db, "asvp rebuild");
+      this.rollbackOpenAsvpShardTransactions(shardContexts);
+      this.closeAsvpShardBuildContexts(shardContexts);
       await cleanupPreparedSourceImportPlan(importPlan).catch(() => undefined);
       throw error;
     }
@@ -960,7 +1088,7 @@ export class RegistryIndexService implements OnModuleDestroy {
     batchId: string,
   ): Promise<number> {
     const importPlan = await prepareSourceImportPlan("court_dates", files);
-    const db = this.getDb();
+    const db = this.getSharedDb();
     let rowsImported = 0;
 
     try {
@@ -1029,6 +1157,52 @@ export class RegistryIndexService implements OnModuleDestroy {
     return rowsImported;
   }
 
+  private parseAsvpBucketKeyFromSourceFileName(
+    fileName: string,
+  ): string | null {
+    const match = fileName.match(/^asvp-(.+)\.csv$/i);
+    return match?.[1] || null;
+  }
+
+  private async resetAsvpShardBuildBucket(
+    contexts: Map<string, AsvpShardBuildContext>,
+    buildRoot: string,
+    bucketKey: string,
+  ): Promise<void> {
+    const existingContext = contexts.get(bucketKey);
+
+    if (existingContext) {
+      this.closeAsvpShardBuildContexts(contexts, new Set([bucketKey]));
+    }
+
+    const fileName = this.buildAsvpShardFileName(bucketKey);
+    const baseFilePath = path.join(buildRoot, fileName);
+
+    await this.removePathIfExists(baseFilePath);
+    await this.removePathIfExists(`${baseFilePath}-wal`);
+    await this.removePathIfExists(`${baseFilePath}-shm`);
+  }
+
+  private async deleteImportedAsvpPreparedFileIfConfigured(
+    importPlan: {
+      sourceFilesToDelete: string[];
+    },
+    filePath: string,
+  ): Promise<void> {
+    if (!this.deleteImportedSourceFiles.asvp) {
+      return;
+    }
+
+    if (!importPlan.sourceFilesToDelete.includes(filePath)) {
+      return;
+    }
+
+    await unlink(filePath).catch(() => undefined);
+    importPlan.sourceFilesToDelete = importPlan.sourceFilesToDelete.filter(
+      (candidate) => candidate !== filePath,
+    );
+  }
+
   private async listSourceFiles(source: ImportSourceCode): Promise<string[]> {
     const directory =
       source === "court_stan"
@@ -1036,12 +1210,47 @@ export class RegistryIndexService implements OnModuleDestroy {
         : source === "asvp"
           ? this.asvpDirectory
           : this.courtDatesDirectory;
+    const filePaths = await this.listCsvFilesRecursively(directory);
 
-    const fileNames = await readdir(directory);
-    return fileNames
-      .filter((fileName) => fileName.toLowerCase().endsWith(".csv"))
-      .sort()
-      .map((fileName) => path.join(directory, fileName));
+    if (source !== "asvp") {
+      return filePaths;
+    }
+
+    const splitFiles = filePaths.filter((filePath) =>
+      filePath.split(path.sep).includes("split"),
+    );
+
+    return splitFiles.length > 0 ? splitFiles : filePaths;
+  }
+
+  private async listCsvFilesRecursively(directory: string): Promise<string[]> {
+    try {
+      const entries = await readdir(directory, { withFileTypes: true });
+      const filePaths: string[] = [];
+
+      for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name);
+
+        if (entry.isDirectory()) {
+          filePaths.push(...(await this.listCsvFilesRecursively(entryPath)));
+          continue;
+        }
+
+        if (entry.name.toLowerCase().endsWith(".csv")) {
+          filePaths.push(entryPath);
+        }
+      }
+
+      return filePaths.sort();
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+
+      if (errno?.code === "ENOENT") {
+        return [];
+      }
+
+      throw error;
+    }
   }
 
   private async computeDirectorySignature(files: string[]): Promise<string> {
@@ -1156,6 +1365,7 @@ export class RegistryIndexService implements OnModuleDestroy {
   }
 
   private queryCourtRegistryRows(
+    db: SqliteDatabase,
     options: CourtRegistrySearchOptions,
     normalizedQuery: string,
   ): Array<Record<string, string>> {
@@ -1202,7 +1412,7 @@ export class RegistryIndexService implements OnModuleDestroy {
 
     if (normalizedQuery) {
       const matchQuery = this.buildFtsQuery(normalizedQuery);
-      return this.getDb()
+      return db
         .prepare(
           `
           SELECT
@@ -1228,7 +1438,7 @@ export class RegistryIndexService implements OnModuleDestroy {
         .all(matchQuery, ...params) as Array<Record<string, string>>;
     }
 
-    return this.getDb()
+    return db
       .prepare(
         `
         SELECT
@@ -1253,6 +1463,7 @@ export class RegistryIndexService implements OnModuleDestroy {
   }
 
   private queryAsvpRows(
+    db: SqliteDatabase,
     options: CourtRegistrySearchOptions,
     normalizedQuery: string,
   ): Array<Record<string, string>> {
@@ -1284,7 +1495,7 @@ export class RegistryIndexService implements OnModuleDestroy {
 
     if (normalizedQuery) {
       const matchQuery = this.buildFtsQuery(normalizedQuery);
-      return this.getDb()
+      return db
         .prepare(
           `
           SELECT
@@ -1299,7 +1510,7 @@ export class RegistryIndexService implements OnModuleDestroy {
         .all(matchQuery, ...params) as Array<Record<string, string>>;
     }
 
-    return this.getDb()
+    return db
       .prepare(
         `
         SELECT
@@ -1557,10 +1768,29 @@ export class RegistryIndexService implements OnModuleDestroy {
       .trim()
       .replace(/[\u200B-\u200D\uFEFF]/g, "")
       .replace(/[“”«»„]/g, '"')
-      .replace(/[’`']/g, "'")
+      .replace(/[ʼ’`'ʹꞌ]/g, "'")
       .replace(/[‐‑‒–—―]/g, "-")
       .replace(/\s+/g, " ")
       .toLocaleLowerCase("uk-UA");
+  }
+
+  private buildSearchQueryVariants(value: string): string[] {
+    if (!value) {
+      return [];
+    }
+
+    const apostropheVariants = ["'", "’", "ʼ"];
+    const normalizedValue = value.replace(/[ʼ’`'ʹꞌ]/g, "'");
+
+    return Array.from(
+      new Set(
+        [value, normalizedValue].flatMap((candidate) =>
+          apostropheVariants.map((apostrophe) =>
+            candidate.replace(/[ʼ’`'ʹꞌ]/g, apostrophe),
+          ),
+        ),
+      ),
+    );
   }
 
   private matchesSearchQuery(
@@ -1684,12 +1914,634 @@ export class RegistryIndexService implements OnModuleDestroy {
       .toLocaleLowerCase("uk-UA");
   }
 
-  private getDb(): SqliteDatabase {
-    if (!this.db) {
-      throw new Error("Registry index DB is not initialized");
+  private buildSchemaSql(kind: RegistryIndexDatabaseKind): string {
+    const sourceTables =
+      kind === "shared"
+        ? `
+            CREATE TABLE IF NOT EXISTS court_registry_participants (
+              id INTEGER PRIMARY KEY,
+              case_number TEXT,
+              case_number_normalized TEXT,
+              participant_raw TEXT,
+              participant_normalized TEXT,
+              participant_role TEXT NULL,
+              court_name TEXT,
+              case_proc TEXT,
+              registration_date TEXT,
+              judge TEXT,
+              judges TEXT,
+              stage_date TEXT,
+              stage_name TEXT,
+              record_type TEXT,
+              case_description TEXT,
+              participants TEXT,
+              source_file TEXT,
+              source_row_num INTEGER NULL,
+              import_batch_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_court_registry_case_number
+              ON court_registry_participants(case_number_normalized);
+            CREATE INDEX IF NOT EXISTS idx_court_registry_participant_normalized
+              ON court_registry_participants(participant_normalized);
+            CREATE VIRTUAL TABLE IF NOT EXISTS court_registry_participants_fts
+              USING fts5(
+                participant_raw,
+                participant_normalized,
+                content='court_registry_participants',
+                content_rowid='id',
+                tokenize='unicode61'
+              );
+
+            CREATE TABLE IF NOT EXISTS court_dates (
+              id INTEGER PRIMARY KEY,
+              case_number TEXT,
+              case_number_normalized TEXT,
+              date TEXT,
+              judges TEXT,
+              court_name TEXT,
+              court_room TEXT,
+              case_involved TEXT,
+              case_description TEXT,
+              source_file TEXT,
+              source_row_num INTEGER NULL,
+              import_batch_id TEXT,
+              created_at TEXT,
+              updated_at TEXT
+            );
+            DROP INDEX IF EXISTS idx_court_dates_case_number;
+            CREATE INDEX IF NOT EXISTS idx_court_dates_case_number
+              ON court_dates(case_number_normalized);
+          `
+        : ``;
+
+    return `
+      ${sourceTables}
+      CREATE TABLE IF NOT EXISTS import_state (
+        source_code TEXT PRIMARY KEY,
+        dataset_url TEXT,
+        resource_name TEXT,
+        resource_url TEXT,
+        remote_updated_at TEXT NULL,
+        remote_fingerprint TEXT NULL,
+        local_file_hash TEXT NULL,
+        extracted_hash TEXT NULL,
+        last_downloaded_at TEXT NULL,
+        last_indexed_at TEXT NULL,
+        last_success_at TEXT NULL,
+        last_status TEXT,
+        last_error TEXT NULL,
+        rows_imported INTEGER DEFAULT 0
+      );
+
+      CREATE TABLE IF NOT EXISTS import_batches (
+        id TEXT PRIMARY KEY,
+        source_code TEXT,
+        started_at TEXT,
+        finished_at TEXT NULL,
+        status TEXT,
+        downloaded INTEGER,
+        extracted INTEGER,
+        indexed INTEGER,
+        rows_processed INTEGER DEFAULT 0,
+        error_message TEXT NULL
+      );
+    `;
+  }
+
+  private buildAsvpShardSchemaSql(): string {
+    return `
+      CREATE TABLE IF NOT EXISTS asvp_records (
+        id INTEGER PRIMARY KEY,
+        vp_ordernum TEXT,
+        debtor_name TEXT,
+        debtor_name_normalized TEXT,
+        creditor_name TEXT,
+        creditor_name_normalized TEXT,
+        org_name TEXT,
+        org_name_normalized TEXT,
+        vp_begindate TEXT,
+        vp_state TEXT,
+        dvs_code TEXT,
+        phone_num TEXT,
+        email_addr TEXT,
+        bank_account TEXT,
+        source_file TEXT,
+        source_row_num INTEGER NULL,
+        import_batch_id TEXT,
+        created_at TEXT,
+        updated_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_asvp_vp_ordernum
+        ON asvp_records(vp_ordernum);
+      CREATE VIRTUAL TABLE IF NOT EXISTS asvp_records_fts
+        USING fts5(
+          debtor_name_normalized,
+          creditor_name_normalized,
+          org_name_normalized,
+          content='asvp_records',
+          content_rowid='id',
+          tokenize='unicode61'
+        );
+    `;
+  }
+
+  private getSharedDb(): SqliteDatabase {
+    if (!this.sharedDb) {
+      throw new Error("Shared registry index DB is not initialized");
     }
 
-    return this.db;
+    return this.sharedDb;
+  }
+
+  private getAsvpDb(): SqliteDatabase {
+    if (!this.asvpDb) {
+      throw new Error("ASVP registry index DB is not initialized");
+    }
+
+    return this.asvpDb;
+  }
+
+  private getPrimaryDbForSource(source: ImportSourceCode): SqliteDatabase {
+    return source === "asvp" ? this.getAsvpDb() : this.getSharedDb();
+  }
+
+  private getDbForSourceCode(sourceCode: string): SqliteDatabase {
+    return sourceCode === "asvp" ? this.getAsvpDb() : this.getSharedDb();
+  }
+
+  private isIndexAvailableInDb(
+    database: SqliteDatabase,
+    source: ImportSourceCode,
+  ): boolean {
+    const row = database
+      .prepare(
+        `SELECT last_status, rows_imported FROM import_state WHERE source_code = ?`,
+      )
+      .get(source) as
+      | { last_status?: string; rows_imported?: number }
+      | undefined;
+
+    return Boolean(row && row.last_status === "success" && row.rows_imported);
+  }
+
+  private async isPrimaryAsvpIndexAvailable(): Promise<boolean> {
+    const row = this.getAsvpDb()
+      .prepare(
+        `
+        SELECT last_success_at, rows_imported
+        FROM import_state
+        WHERE source_code = 'asvp'
+        LIMIT 1
+        `,
+      )
+      .get() as
+      | {
+          last_success_at?: string | null;
+          rows_imported?: number;
+        }
+      | undefined;
+
+    return Boolean(
+      row?.last_success_at &&
+      (row.rows_imported || 0) > 0 &&
+      (await this.hasAsvpShardFiles()),
+    );
+  }
+
+  private isLegacyAsvpIndexAvailable(): boolean {
+    const legacyDb = this.getLegacyAsvpDb();
+
+    if (!legacyDb) {
+      return false;
+    }
+
+    return this.isIndexAvailableInDb(legacyDb, "asvp");
+  }
+
+  private async hasPersistedIndexForSource(
+    source: ImportSourceCode,
+    currentState:
+      | {
+          extracted_hash?: string;
+          last_status?: string;
+          rows_imported?: number;
+          last_success_at?: string;
+        }
+      | undefined,
+  ): Promise<boolean> {
+    if (source !== "asvp") {
+      return Boolean(
+        currentState?.last_status === "success" &&
+        (currentState.rows_imported || 0) > 0,
+      );
+    }
+
+    return Boolean(
+      currentState?.last_success_at &&
+      (currentState.rows_imported || 0) > 0 &&
+      (await this.hasAsvpShardFiles()),
+    );
+  }
+
+  private async hasAsvpShardFiles(): Promise<boolean> {
+    return (await this.listAsvpShardFileNames()).length > 0;
+  }
+
+  private async getAsvpShardDbEntries(
+    options?: CourtRegistrySearchOptions,
+  ): Promise<AsvpShardDbEntry[]> {
+    const fileNames = await this.listAsvpShardFileNames();
+    const activePaths = new Set(
+      fileNames.map((fileName) => path.join(this.asvpShardDirectory, fileName)),
+    );
+
+    this.closeRemovedAsvpShardDbs(activePaths);
+
+    const yearRange = this.getAsvpShardYearRange(options);
+
+    return fileNames
+      .map((fileName) => {
+        const filePath = path.join(this.asvpShardDirectory, fileName);
+        return {
+          bucketKey: this.parseAsvpShardBucketKey(fileName),
+          fileName,
+          filePath,
+        };
+      })
+      .filter((entry) =>
+        this.shouldIncludeAsvpShard(entry.bucketKey, yearRange),
+      )
+      .map((entry) => ({
+        ...entry,
+        db: this.getOrOpenAsvpShardDb(entry.filePath),
+      }));
+  }
+
+  private async listAsvpShardFileNames(): Promise<string[]> {
+    try {
+      const fileNames = await readdir(this.asvpShardDirectory);
+
+      return fileNames
+        .filter((fileName) => /^asvp-.+\.db$/i.test(fileName))
+        .sort((left, right) =>
+          this.compareAsvpShardBucketKeys(
+            this.parseAsvpShardBucketKey(left),
+            this.parseAsvpShardBucketKey(right),
+          ),
+        );
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+
+      if (errno?.code === "ENOENT") {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
+  private getOrOpenAsvpShardDb(filePath: string): SqliteDatabase {
+    const existing = this.asvpShardDbs.get(filePath);
+
+    if (existing) {
+      return existing;
+    }
+
+    const database = new Database(filePath) as unknown as SqliteDatabase;
+    database.pragma("query_only = 1");
+    database.pragma("busy_timeout = 5000");
+    database.pragma("temp_store = MEMORY");
+    this.asvpShardDbs.set(filePath, database);
+    return database;
+  }
+
+  private closeAsvpShardDbs(): void {
+    for (const database of this.asvpShardDbs.values()) {
+      database.close();
+    }
+
+    this.asvpShardDbs.clear();
+  }
+
+  private closeRemovedAsvpShardDbs(activePaths: Set<string>): void {
+    for (const [filePath, database] of this.asvpShardDbs.entries()) {
+      if (activePaths.has(filePath)) {
+        continue;
+      }
+
+      database.close();
+      this.asvpShardDbs.delete(filePath);
+    }
+  }
+
+  private extractAsvpBucketKey(rawDate: string): string {
+    const match = rawDate.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+    return match?.[3] || "unknown";
+  }
+
+  private buildAsvpShardFileName(bucketKey: string): string {
+    const normalizedBucketKey = bucketKey.match(/^\d{4}$/)
+      ? bucketKey
+      : "unknown";
+    return `asvp-${normalizedBucketKey}.db`;
+  }
+
+  private parseAsvpShardBucketKey(fileName: string): string {
+    const match = fileName.match(/^asvp-(.+)\.db$/i);
+    return match?.[1] || "unknown";
+  }
+
+  private compareAsvpShardBucketKeys(left: string, right: string): number {
+    const leftYear = Number(left);
+    const rightYear = Number(right);
+    const leftIsYear = Number.isInteger(leftYear) && left.match(/^\d{4}$/);
+    const rightIsYear = Number.isInteger(rightYear) && right.match(/^\d{4}$/);
+
+    if (leftIsYear && rightIsYear) {
+      return rightYear - leftYear;
+    }
+
+    if (leftIsYear) {
+      return -1;
+    }
+
+    if (rightIsYear) {
+      return 1;
+    }
+
+    return left.localeCompare(right, "en");
+  }
+
+  private getAsvpShardYearRange(options?: CourtRegistrySearchOptions): {
+    fromYear?: number;
+    toYear?: number;
+  } {
+    const from = this.parseIsoDate(options?.dateFrom);
+    const to = this.parseIsoDate(options?.dateTo);
+
+    return {
+      fromYear:
+        from === undefined ? undefined : new Date(from).getUTCFullYear(),
+      toYear: to === undefined ? undefined : new Date(to).getUTCFullYear(),
+    };
+  }
+
+  private shouldIncludeAsvpShard(
+    bucketKey: string,
+    range: { fromYear?: number; toYear?: number },
+  ): boolean {
+    if (range.fromYear === undefined && range.toYear === undefined) {
+      return true;
+    }
+
+    if (!bucketKey.match(/^\d{4}$/)) {
+      return false;
+    }
+
+    const year = Number(bucketKey);
+
+    if (range.fromYear !== undefined && year < range.fromYear) {
+      return false;
+    }
+
+    if (range.toYear !== undefined && year > range.toYear) {
+      return false;
+    }
+
+    return true;
+  }
+
+  private getOrCreateAsvpShardBuildContext(
+    contexts: Map<string, AsvpShardBuildContext>,
+    buildRoot: string,
+    bucketKey: string,
+  ): AsvpShardBuildContext {
+    const existing = contexts.get(bucketKey);
+
+    if (existing) {
+      return existing;
+    }
+
+    const filePath = path.join(
+      buildRoot,
+      this.buildAsvpShardFileName(bucketKey),
+    );
+    const database = new Database(filePath) as unknown as SqliteDatabase;
+    database.pragma("journal_mode = DELETE");
+    database.pragma("synchronous = NORMAL");
+    database.pragma("temp_store = MEMORY");
+    database.pragma("busy_timeout = 5000");
+    database.exec(this.buildAsvpShardSchemaSql());
+    const existingRowId = Number(
+      (
+        database
+          .prepare(`SELECT COALESCE(MAX(id), 0) AS row_id FROM asvp_records`)
+          .get() as { row_id?: number }
+      )?.row_id || 0,
+    );
+
+    const context: AsvpShardBuildContext = {
+      bucketKey,
+      db: database,
+      filePath,
+      insertRow: database.prepare(
+        `
+        INSERT INTO asvp_records (
+          vp_ordernum,
+          debtor_name,
+          debtor_name_normalized,
+          creditor_name,
+          creditor_name_normalized,
+          org_name,
+          org_name_normalized,
+          vp_begindate,
+          vp_state,
+          dvs_code,
+          phone_num,
+          email_addr,
+          bank_account,
+          source_file,
+          source_row_num,
+          import_batch_id,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `,
+      ),
+      insertFts: database.prepare(
+        `
+        INSERT INTO asvp_records_fts (
+          rowid,
+          debtor_name_normalized,
+          creditor_name_normalized,
+          org_name_normalized
+        ) VALUES (?, ?, ?, ?)
+        `,
+      ),
+      rowId: existingRowId,
+      rowsImported: 0,
+      pendingTransactionRows: 0,
+      transactionOpen: false,
+    };
+
+    contexts.set(bucketKey, context);
+    return context;
+  }
+
+  private commitAsvpShardTransaction(context: AsvpShardBuildContext): number {
+    if (!context.transactionOpen || context.pendingTransactionRows <= 0) {
+      return 0;
+    }
+
+    context.db.exec("COMMIT");
+    const committedRows = context.pendingTransactionRows;
+    context.transactionOpen = false;
+    context.pendingTransactionRows = 0;
+    return committedRows;
+  }
+
+  private commitOpenAsvpShardTransactions(
+    contexts: Map<string, AsvpShardBuildContext>,
+  ): number {
+    let committedRows = 0;
+
+    for (const context of contexts.values()) {
+      committedRows += this.commitAsvpShardTransaction(context);
+    }
+
+    return committedRows;
+  }
+
+  private rollbackOpenAsvpShardTransactions(
+    contexts: Map<string, AsvpShardBuildContext>,
+  ): void {
+    for (const context of contexts.values()) {
+      if (!context.transactionOpen) {
+        continue;
+      }
+
+      this.rollbackTransaction(
+        context.db,
+        `asvp shard rebuild ${context.bucketKey}`,
+      );
+      context.transactionOpen = false;
+      context.pendingTransactionRows = 0;
+    }
+  }
+
+  private closeAsvpShardBuildContexts(
+    contexts: Map<string, AsvpShardBuildContext>,
+    bucketKeys?: Set<string>,
+  ): void {
+    for (const [bucketKey, context] of contexts.entries()) {
+      if (bucketKeys && !bucketKeys.has(bucketKey)) {
+        continue;
+      }
+
+      try {
+        context.db.pragma("wal_checkpoint(TRUNCATE)");
+      } catch {
+        // no-op: closing the DB is still the important cleanup step here
+      }
+      context.db.close();
+      contexts.delete(bucketKey);
+    }
+  }
+
+  private updateImportBatchRowsProcessed(
+    database: SqliteDatabase,
+    batchId: string,
+    rowsProcessed: number,
+  ): void {
+    database
+      .prepare(
+        `
+        UPDATE import_batches
+        SET rows_processed = ?
+        WHERE id = ?
+        `,
+      )
+      .run(rowsProcessed, batchId);
+  }
+
+  private async replaceAsvpShardDirectory(buildRoot: string): Promise<void> {
+    await mkdir(path.dirname(this.asvpShardDirectory), { recursive: true });
+    this.closeAsvpShardDbs();
+
+    const backupDirectory = `${this.asvpShardDirectory}.previous-${Date.now()}`;
+    let movedExistingDirectory = false;
+
+    try {
+      if (await this.pathExists(this.asvpShardDirectory)) {
+        await rm(backupDirectory, { recursive: true, force: true });
+        await rename(this.asvpShardDirectory, backupDirectory);
+        movedExistingDirectory = true;
+      }
+
+      await rename(buildRoot, this.asvpShardDirectory);
+
+      if (movedExistingDirectory) {
+        await rm(backupDirectory, { recursive: true, force: true });
+      }
+    } catch (error) {
+      if (
+        movedExistingDirectory &&
+        !(await this.pathExists(this.asvpShardDirectory)) &&
+        (await this.pathExists(backupDirectory))
+      ) {
+        await rename(backupDirectory, this.asvpShardDirectory).catch(
+          () => undefined,
+        );
+      }
+
+      if (await this.pathExists(buildRoot)) {
+        await rm(buildRoot, { recursive: true, force: true }).catch(
+          () => undefined,
+        );
+      }
+
+      throw error;
+    }
+  }
+
+  private async removePathIfExists(targetPath: string): Promise<void> {
+    await rm(targetPath, { recursive: true, force: true }).catch(
+      () => undefined,
+    );
+  }
+
+  private async pathExists(targetPath: string): Promise<boolean> {
+    try {
+      await stat(targetPath);
+      return true;
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+
+      if (errno?.code === "ENOENT") {
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  private getLegacyAsvpDb(): SqliteDatabase | null {
+    const sharedDb = this.getSharedDb();
+
+    if (
+      !this.tableExists(sharedDb, "asvp_records") ||
+      !this.tableExists(sharedDb, "asvp_records_fts")
+    ) {
+      return null;
+    }
+
+    if (!this.isIndexAvailableInDb(sharedDb, "asvp")) {
+      return null;
+    }
+
+    return sharedDb;
   }
 
   private async migrateLegacyRegistrySchema(
@@ -1770,20 +2622,11 @@ export class RegistryIndexService implements OnModuleDestroy {
           ALTER TABLE asvp_records_migrated RENAME TO asvp_records;
           CREATE INDEX IF NOT EXISTS idx_asvp_vp_ordernum
             ON asvp_records(vp_ordernum);
-          CREATE INDEX IF NOT EXISTS idx_asvp_debtor_name_normalized
-            ON asvp_records(debtor_name_normalized);
-          CREATE INDEX IF NOT EXISTS idx_asvp_creditor_name_normalized
-            ON asvp_records(creditor_name_normalized);
-          CREATE INDEX IF NOT EXISTS idx_asvp_org_name_normalized
-            ON asvp_records(org_name_normalized);
           DROP TABLE IF EXISTS asvp_records_fts;
           CREATE VIRTUAL TABLE asvp_records_fts
             USING fts5(
-              debtor_name,
               debtor_name_normalized,
-              creditor_name,
               creditor_name_normalized,
-              org_name,
               org_name_normalized,
               content='asvp_records',
               content_rowid='id',
@@ -1887,28 +2730,56 @@ export class RegistryIndexService implements OnModuleDestroy {
     return columns.some((column) => column.name === columnName);
   }
 
+  private tableExists(database: SqliteDatabase, tableName: string): boolean {
+    const row = database
+      .prepare(
+        `
+        SELECT name
+        FROM sqlite_master
+        WHERE type IN ('table', 'view')
+          AND name = ?
+        LIMIT 1
+        `,
+      )
+      .get(tableName) as { name?: string } | undefined;
+
+    return Boolean(row?.name);
+  }
+
   private rollbackTransaction(db: SqliteDatabase, context: string): void {
+    if (db.inTransaction === false) {
+      return;
+    }
+
     try {
       db.exec("ROLLBACK");
     } catch (error) {
-      this.logger.warn(
-        `Rollback warning during ${context}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+      const message = error instanceof Error ? error.message : String(error);
+
+      if (message.includes("no transaction is active")) {
+        return;
+      }
+
+      this.logger.warn(`Rollback warning during ${context}: ${message}`);
     }
   }
 
-  private compactWriteAheadLogIfPossible(): void {
-    try {
-      const db = this.getDb();
-      db.pragma("wal_checkpoint(TRUNCATE)");
-    } catch (error) {
-      this.logger.warn(
-        `SQLite WAL checkpoint warning: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
+  private compactWriteAheadLogIfPossible(sources: ImportSourceCode[]): void {
+    const kinds = new Set<RegistryIndexDatabaseKind>(
+      sources.map((source) => (source === "asvp" ? "asvp" : "shared")),
+    );
+
+    for (const kind of kinds) {
+      try {
+        const db = kind === "asvp" ? this.getAsvpDb() : this.getSharedDb();
+        db.pragma("wal_checkpoint(TRUNCATE)");
+      } catch (error) {
+        this.logger.warn(
+          `SQLite WAL checkpoint warning for ${kind}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
   }
 
@@ -1947,9 +2818,11 @@ export class RegistryIndexService implements OnModuleDestroy {
           rows_imported?: number;
         }
       | undefined,
+    hasCurrentIndex: boolean,
   ): Promise<void> {
     if (
       !this.deleteImportedSourceFiles[source] ||
+      !hasCurrentIndex ||
       currentState?.last_status !== "success" ||
       (currentState.rows_imported || 0) <= 0
     ) {
@@ -1959,7 +2832,7 @@ export class RegistryIndexService implements OnModuleDestroy {
     try {
       await Promise.all(files.map((filePath) => rm(filePath, { force: true })));
       this.logger.log(
-        `Deleted ${files.length} unchanged ${source} source file(s) after shared-index verification`,
+        `Deleted ${files.length} unchanged ${source} source file(s) after index verification`,
       );
     } catch (error) {
       this.logger.warn(

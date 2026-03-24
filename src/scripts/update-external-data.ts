@@ -1,6 +1,7 @@
 import { Logger } from "@nestjs/common";
 import { ExternalDataService } from "../external-data/services/external-data.service";
 import { RegistryIndexService } from "../registry-index/services/registry-index.service";
+import { loadScriptEnv } from "./load-script-env";
 
 function parseArgs(argv: string[]): {
   source?: "court_stan" | "court_dates" | "reestr" | "asvp";
@@ -21,6 +22,7 @@ function parseArgs(argv: string[]): {
 }
 
 async function main() {
+  loadScriptEnv();
   const logger = new Logger("UpdateExternalDataScript");
   const options = parseArgs(process.argv.slice(2));
   const registryIndexService = new RegistryIndexService();

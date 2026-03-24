@@ -696,26 +696,31 @@ export const NotesPage: React.FC = () => {
                     className={activeNoteId === note.id ? "is-active" : ""}
                     onClick={() => openViewModal(note)}
                   >
-                    <td>
+                    <td data-label="Заголовок">
                       <div className="notes-table-title">
                         <strong>{getNoteTitle(note)}</strong>
                         <span>{getNoteSnippet(note, 110)}</span>
                       </div>
                     </td>
-                    <td>{getNoteClientLabel(note) || "—"}</td>
-                    <td>{getNoteCaseLabel(note) || "—"}</td>
-                    <td>
+                    <td data-label="Клієнт">
+                      {getNoteClientLabel(note) || "—"}
+                    </td>
+                    <td data-label="Справа">{getNoteCaseLabel(note) || "—"}</td>
+                    <td data-label="Доступ">
                       <span className="notes-access-badge">
                         {ACCESS_SCOPE_OPTIONS.find(
                           (option) => option.value === note.accessScope,
                         )?.label || "—"}
                       </span>
                     </td>
-                    <td className="notes-tags-cell">
+                    <td data-label="Теги" className="notes-tags-cell">
                       {note.tags?.length ? note.tags.join(", ") : "—"}
                     </td>
-                    <td>{formatNoteDate(note.updatedAt)}</td>
+                    <td data-label="Оновлено">
+                      {formatNoteDate(note.updatedAt)}
+                    </td>
                     <td
+                      data-label="Дії"
                       className="notes-actions-cell"
                       onClick={(event) => event.stopPropagation()}
                     >

@@ -23,14 +23,11 @@ import { Save, Calendar, Plus, Search } from "lucide-react";
 import {
   buildLegacyParticipantFields,
   buildParticipantMetadata,
-  CaseParticipant,
-  createEmptyParticipant,
-  DEFAULT_PARTICIPANT_GROUP_ID,
   extractParticipantsFromCase,
-  inferParticipantGroup,
   normalizeParticipants,
 } from "../../utils/caseParticipants";
 import { normalizeCaseTypeForForm } from "../../utils/caseCategories";
+import { buildRegistryParticipantsFromPrefill } from "../../utils/caseRegistryPrefill";
 import "./AddCasePage.css";
 
 const COURT_REGISTRY_PREFILL_STORAGE_KEY =
@@ -272,9 +269,7 @@ export const AddCasePage: React.FC = () => {
     setValue("courtName", prefill.courtName, { shouldDirty });
     setValue("judgeName", prefill.judge, { shouldDirty });
 
-    const participants = mapRegistryParticipantsToCaseParticipants(
-      prefill.participants,
-    );
+    const participants = buildRegistryParticipantsFromPrefill(prefill);
     const legacyFields = buildLegacyParticipantFields(participants);
     setValue("participants", participants, { shouldDirty });
     setValue("plaintiffName", legacyFields.plaintiffName, { shouldDirty });
@@ -320,22 +315,9 @@ export const AddCasePage: React.FC = () => {
     setValue("courtName", prefill.courtName, { shouldDirty });
     setValue("judgeName", "", { shouldDirty });
 
-    const counterpartyParticipant =
-      prefill.counterpartyName && prefill.counterpartyRole
-        ? [
-            {
-              ...createEmptyParticipant(
-                inferParticipantGroup(prefill.counterpartyRole),
-              ),
-              name: prefill.counterpartyName,
-              role: prefill.counterpartyRole,
-              groupId: inferParticipantGroup(prefill.counterpartyRole),
-              isCustomRole: false,
-            },
-          ]
-        : [];
-    const legacyFields = buildLegacyParticipantFields(counterpartyParticipant);
-    setValue("participants", counterpartyParticipant, { shouldDirty });
+    const participants = buildRegistryParticipantsFromPrefill(prefill);
+    const legacyFields = buildLegacyParticipantFields(participants);
+    setValue("participants", participants, { shouldDirty });
     setValue("plaintiffName", legacyFields.plaintiffName, { shouldDirty });
     setValue("defendantName", legacyFields.defendantName, { shouldDirty });
     setValue("thirdParties", legacyFields.thirdParties, { shouldDirty });
@@ -702,43 +684,6 @@ const buildClientRegistryQuery = (client: Client): string => {
     .filter(Boolean)
     .join(" ")
     .trim();
-};
-
-const mapRegistryParticipantsToCaseParticipants = (
-  participantsRaw?: string,
-): CaseParticipant[] => {
-  if (!participantsRaw) {
-    return [];
-  }
-
-  return participantsRaw
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean)
-    .map((item) => {
-      const separatorIndex = item.indexOf(":");
-
-      if (separatorIndex === -1) {
-        return {
-          ...createEmptyParticipant(),
-          name: item,
-          role: "Інше",
-          groupId: DEFAULT_PARTICIPANT_GROUP_ID,
-          isCustomRole: true,
-        };
-      }
-
-      const role = item.slice(0, separatorIndex).trim();
-      const name = item.slice(separatorIndex + 1).trim();
-
-      return {
-        ...createEmptyParticipant(inferParticipantGroup(role)),
-        name,
-        role,
-        groupId: inferParticipantGroup(role),
-        isCustomRole: false,
-      };
-    });
 };
 
 export default AddCasePage;

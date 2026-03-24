@@ -13,6 +13,7 @@ import {
   EventType,
   EventReminderUnit,
   EventRecurrencePattern,
+  EventStatus,
 } from "../../database/entities/Event.entity";
 
 /**
@@ -197,13 +198,15 @@ export class UpdateEventDto {
   recurrenceEndDate?: string;
 
   @IsOptional()
-  @IsEnum(["scheduled", "in_progress", "completed", "cancelled", "rescheduled"])
-  status?:
-    | "scheduled"
-    | "in_progress"
-    | "completed"
-    | "cancelled"
-    | "rescheduled";
+  @IsEnum([
+    "scheduled",
+    "in_progress",
+    "completed",
+    "cancelled",
+    "rescheduled",
+    "archived",
+  ])
+  status?: EventStatus;
 
   @IsOptional()
   @IsString()
@@ -223,13 +226,15 @@ export class EventFiltersDto {
   type?: EventType;
 
   @IsOptional()
-  @IsEnum(["scheduled", "in_progress", "completed", "cancelled", "rescheduled"])
-  status?:
-    | "scheduled"
-    | "in_progress"
-    | "completed"
-    | "cancelled"
-    | "rescheduled";
+  @IsEnum([
+    "scheduled",
+    "in_progress",
+    "completed",
+    "cancelled",
+    "rescheduled",
+    "archived",
+  ])
+  status?: EventStatus;
 
   @IsOptional()
   @IsDateString()

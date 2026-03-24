@@ -152,6 +152,75 @@ describe("CourtRegistryService", () => {
     ]);
   });
 
+  it("should reject court_dates in the combined registry search API", async () => {
+    await writeFile(
+      path.join(courtDatesDirectory, "dates.csv"),
+      [
+        '"date"\t"judges"\t"case"\t"court_name"\t"court_room"\t"case_involved"\t"case_description"',
+        '"23.03.2026 14:00"\t"Головуючий суддя: МИЦИК С.А."\t"629/450/26"\t"Лозівський міськрайонний суд Харківської області"\t"2"\t"Позивач: Іванова Людмила Яківна, відповідач: Лозівський відділ державної виконавчої служби"\t"про зняття арешту з майна боржника"',
+      ].join("\n"),
+      "utf-8",
+    );
+
+    await expect(
+      service.searchInCaseRegistries({
+        query: "Іванова Людмила Яківна",
+        source: "court_dates",
+      }),
+    ).rejects.toThrow(BadRequestException);
+  });
+
+  it("should keep court_dates participant search available through the dedicated lookup", async () => {
+    await writeFile(
+      path.join(courtDatesDirectory, "dates.csv"),
+      [
+        '"date"\t"judges"\t"case"\t"court_name"\t"court_room"\t"case_involved"\t"case_description"',
+        '"23.03.2026 14:00"\t"Головуючий суддя: МИЦИК С.А."\t"629/450/26"\t"Лозівський міськрайонний суд Харківської області"\t"2"\t"Позивач: Іванова Людмила Яківна, відповідач: Лозівський відділ державної виконавчої служби"\t"про зняття арешту з майна боржника"',
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const results = await service.searchCourtDates({
+      query: "Іванова Людмила Яківна",
+      onlyUpcoming: false,
+    });
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          caseNumber: "629/450/26",
+          courtName: "Лозівський міськрайонний суд Харківської області",
+          date: "23.03.2026 14:00",
+        }),
+      ]),
+    );
+  });
+
+  it("should match court_dates participants regardless of apostrophe variant", async () => {
+    await writeFile(
+      path.join(courtDatesDirectory, "dates.csv"),
+      [
+        '"date"\t"judges"\t"case"\t"court_name"\t"court_room"\t"case_involved"\t"case_description"',
+        `"02.04.2026 12:10"\t"Головуючий суддя: Краснокутська Н.С."\t"175/2344/26"\t"Дніпропетровський районний суд Дніпропетровської області"\t""\t"Позивач: ТОВАРИСТВО З ОБМЕЖЕНОЮ ВІДПОВІДАЛЬНІСТЮ ""ДІДЖИ ФІНАНС"", відповідач: Іванова Мар'яна Василівна"\t"про стягнення заборгованості за кредитним договором"`,
+      ].join("\n"),
+      "utf-8",
+    );
+
+    const results = await service.searchCourtDates({
+      query: "Іванова Марʼяна Василівна",
+      onlyUpcoming: false,
+    });
+
+    expect(results).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          caseNumber: "175/2344/26",
+          caseInvolved: expect.stringContaining("Іванова Мар'яна Василівна"),
+        }),
+      ]),
+    );
+  });
+
   it("should find a court date row by case number", async () => {
     await writeFile(
       path.join(courtDatesDirectory, "dates.csv"),
@@ -234,6 +303,17 @@ describe("CourtRegistryService", () => {
             caseNumber: "760/123/26",
           },
         ]),
+        searchCourtDates: jest.fn().mockResolvedValue([
+          {
+            date: "25.03.2026 11:30",
+            judges: "Суддя",
+            caseNumber: "760/123/26",
+            courtName: "Шевченківський районний суд міста Києва",
+            courtRoom: "12",
+            caseInvolved: "Іваненко Іван Іванович",
+            caseDescription: "стягнення заборгованості",
+          },
+        ]),
         findCourtDateByCaseNumber: jest.fn().mockResolvedValue({
           date: "25.03.2026 11:30",
           judges: "Суддя",
@@ -262,5 +342,50 @@ describe("CourtRegistryService", () => {
         caseDescription: "стягнення заборгованості",
       },
     ]);
+  });
+
+  it("should return an empty court_dates search result when indexed lookup misses and raw court_dates files are absent", async () => {
+    const indexedService = new CourtRegistryService(
+      [courtDirectory],
+      [asvpDirectory],
+      [path.join(tempDirectory, "missing-court-dates")],
+      {
+        isIndexAvailableFor: jest
+          .fn()
+          .mockImplementation(
+            async (source: string) =>
+              source === "court_stan" || source === "court_dates",
+          ),
+        searchCourtDates: jest.fn().mockResolvedValue([]),
+        searchCourtRegistry: jest.fn().mockResolvedValue([]),
+        findCourtDateByCaseNumber: jest.fn().mockResolvedValue(null),
+      } as any,
+    );
+
+    await expect(
+      indexedService.searchCourtDates({
+        query: "Шевченко Валерій Вадимович",
+        caseNumber: "195/334/26",
+        onlyUpcoming: true,
+      }),
+    ).resolves.toEqual([]);
+  });
+
+  it("should return an empty batch match map when indexed lookup misses and raw court_dates files are absent", async () => {
+    const indexedService = new CourtRegistryService(
+      [courtDirectory],
+      [asvpDirectory],
+      [path.join(tempDirectory, "missing-court-dates")],
+      {
+        isIndexAvailableFor: jest
+          .fn()
+          .mockImplementation(async (source: string) => source === "court_dates"),
+        findCourtDateByCaseNumber: jest.fn().mockResolvedValue(null),
+      } as any,
+    );
+
+    await expect(
+      indexedService.findCourtDatesByCaseNumbers(["195/334/26"]),
+    ).resolves.toEqual(new Map());
   });
 });

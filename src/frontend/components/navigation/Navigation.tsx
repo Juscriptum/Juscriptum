@@ -3,7 +3,6 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Logo } from "../../common/Logo";
 import { usePermissions } from "../../hooks/usePermissions";
 import { useAuth } from "../../hooks/useAuth";
-import { Breadcrumbs } from "./Breadcrumbs";
 import { buildLoginRedirectPath } from "../../utils/authRedirect";
 import {
   Activity,
@@ -469,7 +468,6 @@ export const TopNavigation: React.FC<TopNavigationProps> = ({
           <span className="workspace-pulse-label">Робочий день</span>
           <strong>{currentDate}</strong>
         </div>
-        <Breadcrumbs className="top-breadcrumbs" />
       </div>
 
       <div className="top-nav-right">

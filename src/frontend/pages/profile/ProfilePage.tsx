@@ -1,10 +1,13 @@
 import React, { FormEvent, useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth";
 import { Alert } from "../../components/Alert";
+import { PageHeader } from "../../components/PageHeader";
 import { Spinner } from "../../components/Spinner";
+import { Breadcrumbs } from "../../components/navigation";
 import { profileService } from "../../services/profile.service";
 import { UserProfile } from "../../types/profile.types";
 import { UserProfileDetailsForm } from "../../components/profile/UserProfileDetailsForm";
+import "../workspace/WorkspacePage.css";
 import "./ProfilePage.css";
 
 export const ProfilePage: React.FC = () => {
@@ -86,7 +89,12 @@ export const ProfilePage: React.FC = () => {
 
   if (isLoading) {
     return (
-      <div className="profile-page">
+      <div className="workspace-page profile-page">
+        <Breadcrumbs />
+        <PageHeader
+          title="Профіль"
+          subtitle="Керуйте персональними даними, реквізитами та безпекою облікового запису."
+        />
         <div className="profile-loading">
           <Spinner size="large" />
           <p>Завантаження профілю...</p>
@@ -96,8 +104,14 @@ export const ProfilePage: React.FC = () => {
   }
 
   return (
-    <div className="profile-page">
-      <div className="profile-header">
+    <div className="workspace-page profile-page">
+      <Breadcrumbs />
+      <PageHeader
+        title="Профіль"
+        subtitle="Керуйте персональними даними, реквізитами та безпекою облікового запису."
+      />
+
+      <section className="profile-hero">
         <div className="profile-avatar">
           {profile?.avatarUrl ? (
             <img src={profile.avatarUrl} alt="Avatar" />
@@ -109,18 +123,18 @@ export const ProfilePage: React.FC = () => {
           )}
         </div>
         <div className="profile-info">
-          <h1>
+          <h2>
             {profile?.firstName || user?.firstName}{" "}
             {profile?.lastName || user?.lastName}
-          </h1>
+          </h2>
           <p>{profile?.email || user?.email}</p>
         </div>
-      </div>
+      </section>
 
       {message ? <Alert type={message.type}>{message.text}</Alert> : null}
 
       <div className="profile-content">
-        <div className="profile-section">
+        <div className="profile-section profile-section--details">
           <UserProfileDetailsForm
             email={profile?.email || user?.email || ""}
             initialData={profile || undefined}

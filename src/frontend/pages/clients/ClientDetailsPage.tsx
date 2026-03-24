@@ -2,19 +2,14 @@ import React, { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import {
-  ArrowLeft,
-  BriefcaseBusiness,
-  Calendar,
-  FolderOpen,
-  Pencil,
-  Save,
-} from "lucide-react";
+import { ArrowLeft, FolderOpen, Pencil, Save } from "lucide-react";
 import { Alert } from "../../components/Alert";
+import { ContactText } from "../../components/ContactText";
 import { FormActionBar } from "../../components/FormActionBar";
 import { Spinner } from "../../components/Spinner";
 import { PageHeader } from "../../components/PageHeader";
 import { Breadcrumbs } from "../../components/navigation";
+import { RecordActionsMenu } from "../../components/RecordActionsMenu";
 import RelatedNotesPanel from "../../components/notes/RelatedNotesPanel";
 import { ClientForm } from "../../components/clients";
 import {
@@ -59,6 +54,7 @@ const EMPTY_VALUE = "Не вказано";
 interface InfoItem {
   label: string;
   value: string;
+  valueKind?: "text" | "contact";
 }
 
 interface InfoSection {
@@ -163,15 +159,25 @@ const buildClientSections = (client: Client): InfoSection[] => {
       {
         title: "Контакти",
         items: [
-          { label: "Телефон", value: formatValue(client.phone) },
+          {
+            label: "Телефон",
+            value: formatValue(client.phone),
+            valueKind: "contact",
+          },
           {
             label: "Додаткові телефони",
             value: formatList(contact.additional_phones),
+            valueKind: "contact",
           },
-          { label: "Email", value: formatValue(client.email) },
+          {
+            label: "Email",
+            value: formatValue(client.email),
+            valueKind: "contact",
+          },
           {
             label: "Додаткові email",
             value: formatList(contact.additional_emails),
+            valueKind: "contact",
           },
           { label: "Месенджери", value: formatMessengers(contact.messengers) },
         ],
@@ -202,15 +208,25 @@ const buildClientSections = (client: Client): InfoSection[] => {
       {
         title: "Контакти",
         items: [
-          { label: "Телефон", value: formatValue(client.phone) },
+          {
+            label: "Телефон",
+            value: formatValue(client.phone),
+            valueKind: "contact",
+          },
           {
             label: "Додаткові телефони",
             value: formatList(contact.additional_phones),
+            valueKind: "contact",
           },
-          { label: "Email", value: formatValue(client.email) },
+          {
+            label: "Email",
+            value: formatValue(client.email),
+            valueKind: "contact",
+          },
           {
             label: "Додаткові email",
             value: formatList(contact.additional_emails),
+            valueKind: "contact",
           },
           { label: "Месенджери", value: formatMessengers(contact.messengers) },
         ],
@@ -266,18 +282,22 @@ const buildClientSections = (client: Client): InfoSection[] => {
           {
             label: "Телефон",
             value: formatValue(contactPerson.phone || client.phone),
+            valueKind: "contact",
           },
           {
             label: "Додаткові телефони",
             value: formatList(contactPerson.additional_phones),
+            valueKind: "contact",
           },
           {
             label: "Email",
             value: formatValue(contactPerson.email || client.email),
+            valueKind: "contact",
           },
           {
             label: "Додаткові email",
             value: formatList(contactPerson.additional_emails),
+            valueKind: "contact",
           },
           {
             label: "Месенджери",
@@ -474,6 +494,21 @@ export const ClientDetailsPage: React.FC = () => {
     setError(null);
   };
 
+  const quickActionItems = [
+    {
+      label: "Додати справу",
+      to: `/cases/add?client_id=${client.id}`,
+    },
+    {
+      label: "Додати подію",
+      to: `/events/add?clientId=${client.id}`,
+    },
+    {
+      label: "Додати нотатку",
+      to: `/notes?clientId=${client.id}&new=1`,
+    },
+  ];
+
   return (
     <div className="add-client-page client-details-page">
       <Breadcrumbs />
@@ -498,27 +533,13 @@ export const ClientDetailsPage: React.FC = () => {
               <FolderOpen size={18} />
               Документи
             </Link>
-            <Link
-              to={`/cases/add?client_id=${client.id}`}
-              className="btn btn-outline"
-            >
-              <BriefcaseBusiness size={18} />
-              Додати справу
-            </Link>
-            <Link
-              to={`/events/add?clientId=${client.id}`}
-              className="btn btn-outline"
-            >
-              <Calendar size={18} />
-              Додати подію
-            </Link>
-            <Link
-              to={`/notes?clientId=${client.id}&new=1`}
-              className="btn btn-outline"
-            >
-              <Pencil size={18} />
-              Додати нотатку
-            </Link>
+            {!isEditing && (
+              <RecordActionsMenu
+                actions={quickActionItems}
+                ariaLabel="Швидкі дії з клієнтом"
+                triggerLabel="Швидкі дії"
+              />
+            )}
             {!isEditing && (
               <button
                 type="button"
@@ -688,7 +709,11 @@ export const ClientDetailsPage: React.FC = () => {
                     <span
                       className={`client-info-value ${item.value === EMPTY_VALUE ? "is-empty" : ""}`}
                     >
-                      {item.value}
+                      {item.valueKind === "contact" ? (
+                        <ContactText value={item.value} emptyValue={EMPTY_VALUE} />
+                      ) : (
+                        item.value
+                      )}
                     </span>
                   </div>
                 ))}

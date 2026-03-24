@@ -4,6 +4,7 @@ import {
   UpdateOrganizationData,
   OrganizationSubscription,
   OnboardingProgress,
+  RegistryImportStateSummary,
 } from "../types/organization.types";
 
 /**
@@ -38,6 +39,15 @@ export const organizationService = {
    */
   async getOnboardingProgress(): Promise<OnboardingProgress> {
     return api.get<OnboardingProgress>("/organizations/onboarding");
+  },
+
+  /**
+   * Get registry dataset/import metadata for settings
+   */
+  async getRegistryImports(): Promise<RegistryImportStateSummary[]> {
+    return api.get<RegistryImportStateSummary[]>(
+      "/organizations/me/registry-imports",
+    );
   },
 
   /**

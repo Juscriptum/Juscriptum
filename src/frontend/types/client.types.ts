@@ -73,6 +73,8 @@ export interface NextClientNumberResponse {
 }
 
 export interface CourtRegistrySearchResult {
+  source?: "court_registry" | "asvp" | "court_dates";
+  sourceLabel?: string;
   person: string;
   role: string;
   caseDescription: string;

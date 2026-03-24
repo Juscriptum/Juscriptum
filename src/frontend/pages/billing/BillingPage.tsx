@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { PageHeader } from "../../components/PageHeader";
+import { Spinner } from "../../components/Spinner";
+import { Breadcrumbs } from "../../components/navigation";
 import { subscriptionService } from "../../services/subscription.service";
 import { useSubscription } from "../../hooks/useSubscription";
 import { usePermissions } from "../../hooks/usePermissions";
@@ -9,6 +12,7 @@ import type {
 } from "../../types/subscription.types";
 import { PLAN_LIMITS } from "../../types/subscription.types";
 import { formatCurrencyLabel } from "../../utils/currency";
+import "../workspace/WorkspacePage.css";
 import "./BillingPage.css";
 
 /**
@@ -114,6 +118,9 @@ export const BillingPage: React.FC = () => {
   );
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const pageTitle = "Керування підпискою";
+  const pageSubtitle =
+    "Оберіть план, який найкраще підходить для вашої практики.";
 
   const plans = [
     {
@@ -187,8 +194,10 @@ export const BillingPage: React.FC = () => {
 
   if (!isOwner()) {
     return (
-      <div className="billing-page">
-        <div className="access-denied">
+      <div className="workspace-page billing-page">
+        <Breadcrumbs />
+        <PageHeader title={pageTitle} subtitle={pageSubtitle} />
+        <div className="content-surface access-denied">
           <h2>Доступ обмежено</h2>
           <p>Тільки власник організації може керувати підпискою.</p>
           <button
@@ -202,12 +211,23 @@ export const BillingPage: React.FC = () => {
     );
   }
 
-  return (
-    <div className="billing-page">
-      <div className="billing-header">
-        <h1>Керування підпискою</h1>
-        <p>Оберіть план, який найкраще підходить для вашої практики</p>
+  if (subscriptionLoading) {
+    return (
+      <div className="workspace-page billing-page">
+        <Breadcrumbs />
+        <PageHeader title={pageTitle} subtitle={pageSubtitle} />
+        <div className="content-surface billing-loading">
+          <Spinner size="large" />
+          <p>Завантаження інформації про підписку...</p>
+        </div>
       </div>
+    );
+  }
+
+  return (
+    <div className="workspace-page billing-page">
+      <Breadcrumbs />
+      <PageHeader title={pageTitle} subtitle={pageSubtitle} />
 
       {subscription && (
         <div className="current-subscription">

@@ -97,13 +97,22 @@ export class RlsQueryRunnerPatcher implements OnModuleInit {
 
     this.dataSource.createQueryRunner = (...args) => {
       const queryRunner = originalCreateQueryRunner(...args);
-      const originalQuery = queryRunner.query.bind(queryRunner);
+      const patchedQueryRunner = queryRunner as any;
+      const originalQuery = queryRunner.query.bind(queryRunner) as (
+        query: string,
+        parameters?: any[],
+        useStructuredResult?: boolean,
+      ) => Promise<unknown>;
       const originalRelease = queryRunner.release.bind(queryRunner);
 
       let lastAppliedContextKey: string | null = null;
       let applyingContext = false;
 
-      queryRunner.query = async (query: string, parameters?: any[]) => {
+      patchedQueryRunner.query = async (
+        query: string,
+        parameters?: any[],
+        useStructuredResult?: boolean,
+      ) => {
         if (!applyingContext && !this.isSessionContextQuery(query)) {
           const context = this.contextStore.get();
           const nextContextKey = this.getContextKey(context);
@@ -140,10 +149,10 @@ export class RlsQueryRunnerPatcher implements OnModuleInit {
           }
         }
 
-        return originalQuery(query, parameters);
+        return originalQuery(query, parameters, useStructuredResult);
       };
 
-      queryRunner.release = async () => {
+      patchedQueryRunner.release = async () => {
         lastAppliedContextKey = null;
         return originalRelease();
       };

@@ -58,9 +58,10 @@ interface CourtDateRow {
   case_description: string;
 }
 
-export type RegistrySource = "court_registry" | "asvp";
+export type RegistrySource = "court_registry" | "asvp" | "court_dates";
 export const COURT_REGISTRY_SOURCE_LABEL = "Судовий реєстр";
 export const ASVP_SOURCE_LABEL = "Реєстр виконавчих проваджень";
+export const COURT_DATES_SOURCE_LABEL = "Дати судових засідань";
 
 export interface CourtRegistrySearchResult {
   source: RegistrySource;
@@ -222,21 +223,28 @@ export class CourtRegistryService {
   ): Promise<CourtRegistrySearchResult[]> {
     this.validateSearchOptions(options);
 
+    if (options.source === "court_dates") {
+      throw new BadRequestException(
+        "`court_dates` використовується лише для пошуку найближчих засідань по справі. Для загального пошуку в реєстрах використовуйте `court_registry` або `asvp`.",
+      );
+    }
+
     const shouldSearchCourt =
       !options.source || options.source === "court_registry";
     const shouldSearchAsvp = !options.source || options.source === "asvp";
-    const [courtResults, asvpResults] = await Promise.allSettled([
-      shouldSearchCourt
-        ? this.searchInCourtRegistry(options)
-        : Promise.resolve([] as CourtRegistrySearchResult[]),
-      shouldSearchAsvp
-        ? this.withTimeout(
-            this.searchInAsvpRegistry(options),
-            this.combinedAsvpTimeoutMs,
-            "ASVP combined search timeout",
-          )
-        : Promise.resolve([] as CourtRegistrySearchResult[]),
-    ]);
+    const [courtResults, asvpResults] =
+      await Promise.allSettled([
+        shouldSearchCourt
+          ? this.searchInCourtRegistry(options)
+          : Promise.resolve([] as CourtRegistrySearchResult[]),
+        shouldSearchAsvp
+          ? this.withTimeout(
+              this.searchInAsvpRegistry(options),
+              this.combinedAsvpTimeoutMs,
+              "ASVP combined search timeout",
+            )
+          : Promise.resolve([] as CourtRegistrySearchResult[]),
+      ]);
 
     if (courtResults.status === "rejected") {
       this.logger.warn(
@@ -262,6 +270,51 @@ export class CourtRegistryService {
       ...(courtResults.status === "fulfilled" ? courtResults.value : []),
       ...(asvpResults.status === "fulfilled" ? asvpResults.value : []),
     ];
+  }
+
+  async searchInCourtDatesRegistry(
+    options: CourtRegistrySearchOptions,
+  ): Promise<CourtRegistrySearchResult[]> {
+    const normalizedQuery = this.normalizeSearchValue(options.query || "");
+    const results = await this.searchCourtDates({
+      query: options.query,
+      caseNumber: options.caseNumber,
+      onlyUpcoming: false,
+      limit: 50,
+    });
+
+    return results
+      .flatMap((result) =>
+        this.extractCourtDateParticipants(result)
+          .filter((participant) =>
+            this.matchesCourtDateParticipant(
+              result,
+              participant,
+              options,
+              normalizedQuery,
+            ),
+          )
+          .map((participant) => ({
+            source: "court_dates" as const,
+            sourceLabel: COURT_DATES_SOURCE_LABEL,
+            person: participant.person,
+            role: participant.role,
+            caseDescription: result.caseDescription || "",
+            caseNumber: result.caseNumber || "",
+            courtName: result.courtName || "",
+            caseProc: "",
+            registrationDate: result.date || "",
+            judge: result.judges || "",
+            type: "Судове засідання",
+            stageDate: result.date || "",
+            stageName: "Найближче засідання",
+            participants: result.caseInvolved || "",
+          })),
+      )
+      .sort((left, right) =>
+        this.compareSearchResults(left.person, right.person, normalizedQuery),
+      )
+      .slice(0, 200);
   }
 
   async searchInAsvpRegistry(
@@ -390,10 +443,23 @@ export class CourtRegistryService {
       }
     }
 
-    const directory = await this.resolveDirectory(
+    const directory = await this.resolveDirectoryIfPresent(
       this.courtDatesDirectories,
-      "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
     );
+
+    if (!directory) {
+      if (this.registryIndexService) {
+        this.logger.warn(
+          "Court dates raw directory is missing; returning indexed batch matches only.",
+        );
+        return new Map();
+      }
+
+      throw new NotFoundException(
+        "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
+      );
+    }
+
     const fileNames = await this.listCsvFiles(directory);
     const matches = new Map<string, CourtDateSearchResult>();
 
@@ -473,6 +539,45 @@ export class CourtRegistryService {
       return [directMatch];
     }
 
+    if (this.registryIndexService) {
+      try {
+        const hasCourtDatesIndex =
+          await this.registryIndexService.isIndexAvailableFor("court_dates");
+
+        if (hasCourtDatesIndex) {
+          const directIndexedResults =
+            await this.registryIndexService.searchCourtDates(options);
+          const filteredIndexedResults = directIndexedResults
+            .filter((result) =>
+              options.onlyUpcoming
+                ? this.isUpcomingCourtDateValue(result.date, new Date())
+                : true,
+            )
+            .sort((left, right) => {
+              const leftTimestamp =
+                this.parseCourtDateValue(left.date)?.getTime() ??
+                Number.MAX_SAFE_INTEGER;
+              const rightTimestamp =
+                this.parseCourtDateValue(right.date)?.getTime() ??
+                Number.MAX_SAFE_INTEGER;
+
+              return leftTimestamp - rightTimestamp;
+            })
+            .slice(0, limit);
+
+          if (filteredIndexedResults.length > 0) {
+            return filteredIndexedResults;
+          }
+        }
+      } catch (error) {
+        this.logger.warn(
+          `Direct court_dates indexed search failed, falling back to secondary strategies: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
     const indexedResults = await this.searchCourtDatesViaRegistryIndex(
       options,
       normalizedQuery,
@@ -484,10 +589,23 @@ export class CourtRegistryService {
       return indexedResults;
     }
 
-    const directory = await this.resolveDirectory(
+    const directory = await this.resolveDirectoryIfPresent(
       this.courtDatesDirectories,
-      "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
     );
+
+    if (!directory) {
+      if (this.registryIndexService) {
+        this.logger.warn(
+          "Court dates raw directory is missing; returning indexed search results only.",
+        );
+        return [];
+      }
+
+      throw new NotFoundException(
+        "Каталог дат судових засідань не знайдено. Очікувався `court_dates` у корені проєкту.",
+      );
+    }
+
     const fileNames = await this.listCsvFiles(directory);
     const now = new Date();
     const deduplicatedMatches = new Map<string, CourtDateSearchResult>();
@@ -1153,6 +1271,50 @@ export class CourtRegistryService {
     };
   }
 
+  private extractCourtDateParticipants(
+    result: CourtDateSearchResult,
+  ): Array<{ role: string; person: string; personNormalized: string }> {
+    return (result.caseInvolved || "")
+      .split(",")
+      .map((participant) => this.parseParticipant(participant.trim()))
+      .filter((participant) => participant.person.length > 0);
+  }
+
+  private matchesCourtDateParticipant(
+    result: CourtDateSearchResult,
+    participant: {
+      role: string;
+      person: string;
+      personNormalized: string;
+    },
+    options: CourtRegistrySearchOptions,
+    normalizedQuery: string,
+  ): boolean {
+    return (
+      this.matchesSearchQuery(participant.personNormalized, normalizedQuery) &&
+      this.matchesContainsFilter(
+        this.normalizeCaseNumber(result.caseNumber || ""),
+        this.normalizeCaseNumber(options.caseNumber || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(result.courtName || ""),
+        this.normalizeSearchValue(options.institutionName || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(participant.role),
+        this.normalizeSearchValue(options.role || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue(result.judges || ""),
+        this.normalizeSearchValue(options.judge || ""),
+      ) &&
+      this.matchesContainsFilter(
+        this.normalizeSearchValue("Судове засідання"),
+        this.normalizeSearchValue(options.proceedingType || ""),
+      )
+    );
+  }
+
   private matchesCourtParticipant(
     row: CourtRegistryRow,
     participant: {
@@ -1351,6 +1513,18 @@ export class CourtRegistryService {
     directories: string[],
     notFoundMessage: string,
   ): Promise<string> {
+    const resolvedDirectory = await this.resolveDirectoryIfPresent(directories);
+
+    if (resolvedDirectory) {
+      return resolvedDirectory;
+    }
+
+    throw new NotFoundException(notFoundMessage);
+  }
+
+  private async resolveDirectoryIfPresent(
+    directories: string[],
+  ): Promise<string | null> {
     for (const directory of directories) {
       try {
         await access(directory);
@@ -1360,7 +1534,7 @@ export class CourtRegistryService {
       }
     }
 
-    throw new NotFoundException(notFoundMessage);
+    return null;
   }
 
   private async listCsvFiles(directory: string): Promise<string[]> {
@@ -1521,7 +1695,7 @@ export class CourtRegistryService {
       .replace(/[\u200B-\u200D\uFEFF]/g, "")
       .replace(/[“”«»„]/g, '"')
       .replace(/\s+/g, " ")
-      .replace(/[’`']/g, "'")
+      .replace(/[ʼ’`'ʹꞌ]/g, "'")
       .replace(/[‐‑‒–—―]/g, "-")
       .toLocaleLowerCase("uk-UA");
   }

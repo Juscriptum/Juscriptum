@@ -61,6 +61,10 @@ export class EventService {
     // Filter by status
     if (filters.status) {
       query.andWhere("event.status = :status", { status: filters.status });
+    } else {
+      query.andWhere("event.status != :archivedStatus", {
+        archivedStatus: "archived",
+      });
     }
 
     // Filter by date range
@@ -315,6 +319,9 @@ export class EventService {
       .leftJoinAndSelect("event.case", "case")
       .where("event.tenantId = :tenantId", { tenantId })
       .andWhere("event.deletedAt IS NULL")
+      .andWhere("event.status != :archivedStatus", {
+        archivedStatus: "archived",
+      })
       .andWhere("event.eventDate <= :normalizedEnd", { normalizedEnd })
       .andWhere(
         `(
@@ -445,6 +452,9 @@ export class EventService {
       .where("event.tenantId = :tenantId AND event.deletedAt IS NULL", {
         tenantId,
       })
+      .andWhere("event.status != :archivedStatus", {
+        archivedStatus: "archived",
+      })
       .getRawMany();
 
     const [upcoming] = await this.eventRepository
@@ -471,6 +481,9 @@ export class EventService {
       .where("event.tenantId = :tenantId AND event.deletedAt IS NULL", {
         tenantId,
       })
+      .andWhere("event.status != :archivedStatus", {
+        archivedStatus: "archived",
+      })
       .groupBy("event.type")
       .getRawMany();
 
@@ -479,6 +492,9 @@ export class EventService {
       .select("event.status", "COUNT(*) as count")
       .where("event.tenantId = :tenantId AND event.deletedAt IS NULL", {
         tenantId,
+      })
+      .andWhere("event.status != :archivedStatus", {
+        archivedStatus: "archived",
       })
       .groupBy("event.status")
       .getRawMany();

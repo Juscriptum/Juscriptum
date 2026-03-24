@@ -1,0 +1,127 @@
+.registry-surface {
+  border: 1px solid rgba(16, 25, 38, 0.07);
+  border-radius: 0.85rem;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgba(16, 25, 38, 0.04);
+  overflow: hidden;
+}
+
+.registry-filter-bar {
+  display: grid;
+  gap: var(--space-3);
+  align-items: end;
+  padding: var(--space-3);
+  border-bottom: 1px solid rgba(16, 25, 38, 0.06);
+  background: #f8fafc;
+}
+
+.registry-search-field {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  min-width: 0;
+  min-height: var(--control-height-md);
+  padding: 0 0.78rem;
+  background: #ffffff;
+  border: 1px solid rgba(16, 25, 38, 0.08);
+  border-radius: var(--radius-md);
+}
+
+.registry-search-field svg {
+  color: var(--color-ink-400);
+  flex-shrink: 0;
+}
+
+.registry-search-field input {
+  width: 100%;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  outline: none;
+  font-size: var(--text-sm);
+  color: var(--color-ink-900);
+  font-family: var(--font-sans);
+}
+
+.registry-filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.22rem;
+  min-width: 0;
+}
+
+.registry-filter-group__label {
+  font-size: var(--text-caption);
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--color-ink-500);
+}
+
+.registry-filter-bar select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height-md);
+  padding: 0 0.78rem;
+  border: 1px solid rgba(16, 25, 38, 0.08);
+  border-radius: var(--radius-md);
+  background: #ffffff;
+  font-size: var(--text-sm);
+  color: var(--color-ink-900);
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.registry-table-shell {
+  overflow-x: auto;
+}
+
+.registry-loading-state,
+.registry-empty-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 3rem 1.25rem;
+}
+
+.registry-empty-state {
+  flex-direction: column;
+  text-align: center;
+}
+
+.registry-empty-state svg {
+  color: rgba(102, 117, 138, 0.35);
+  margin-bottom: 0.9rem;
+}
+
+.registry-empty-state h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1rem;
+  font-weight: 800;
+  color: var(--color-ink-900);
+}
+
+.registry-empty-state p {
+  margin: 0 0 1.1rem;
+  font-size: 0.84rem;
+  color: var(--color-ink-500);
+}
+
+.registry-pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0.82rem;
+}
+
+.registry-pagination__info {
+  font-size: 0.78rem;
+  color: var(--color-ink-500);
+}
+
+@media (max-width: 768px) {
+  .registry-pagination {
+    flex-direction: column;
+  }
+}

@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { FormProvider, useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Calendar, Pencil, Save } from "lucide-react";
 import { caseService } from "../../services/case.service";
 import { clientService } from "../../services/client.service";
@@ -9,7 +9,9 @@ import { Alert } from "../../components/Alert";
 import { FormActionBar } from "../../components/FormActionBar";
 import { Spinner } from "../../components/Spinner";
 import { PageHeader } from "../../components/PageHeader";
+import { RegistryHearingPreviewModal } from "../../components/RegistryHearingPreviewModal";
 import { Breadcrumbs } from "../../components/navigation";
+import { RecordActionsMenu } from "../../components/RecordActionsMenu";
 import RelatedNotesPanel from "../../components/notes/RelatedNotesPanel";
 import { CaseFormSections } from "../../components/cases";
 import { useAuth } from "../../hooks/useAuth";
@@ -103,7 +105,22 @@ const mapCaseToFormData = (
   metadata: caseItem.metadata || {},
 });
 
+const buildCalendarEventLink = (eventId?: string, date?: string) => {
+  if (!eventId) {
+    return "";
+  }
+
+  const params = new URLSearchParams({ eventId });
+
+  if (date) {
+    params.set("date", date);
+  }
+
+  return `/calendar?${params.toString()}`;
+};
+
 export const CaseDetailsPage: React.FC = () => {
+  const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
   const [caseItem, setCaseItem] = useState<Case | null>(null);
@@ -124,6 +141,35 @@ export const CaseDetailsPage: React.FC = () => {
     string | null
   >(null);
   const [registryEventCreating, setRegistryEventCreating] = useState(false);
+  const timelineDisplayItems = useMemo(
+    () =>
+      timeline.map((event) => {
+        const isEvent = event.type === "event";
+        const isDocument = event.type === "document";
+        const linkTo = isEvent
+          ? buildCalendarEventLink(event.data?.id, event.date)
+          : "";
+
+        return {
+          ...event,
+          isClickable: Boolean(linkTo),
+          linkTo,
+          typeLabel: isEvent
+            ? "Подія"
+            : isDocument
+              ? "Документ"
+              : "Стадія розгляду",
+          title: isEvent
+            ? event.data?.title
+            : isDocument
+              ? event.data?.originalName
+              : event.data?.stageName || event.data?.title || "Стадія розгляду",
+        };
+      }),
+    [timeline],
+  );
+  const [registrySuggestionModalOpen, setRegistrySuggestionModalOpen] =
+    useState(false);
 
   const methods = useForm<CreateCaseFormData>({
     resolver: zodResolver(createCaseSchema),
@@ -204,9 +250,11 @@ export const CaseDetailsPage: React.FC = () => {
       setRegistrySuggestionLoading(true);
       setRegistrySuggestionError(null);
       const suggestion = await caseService.getRegistryHearingSuggestion(id);
-      setRegistrySuggestion(
-        suggestion && !suggestion.eventAlreadyExists ? suggestion : null,
-      );
+      setRegistrySuggestion(suggestion);
+
+      if (suggestion) {
+        setRegistrySuggestionModalOpen(true);
+      }
 
       if (!suggestion && showEmptyState) {
         setRegistrySuggestionError(
@@ -219,18 +267,11 @@ export const CaseDetailsPage: React.FC = () => {
         err.response?.data?.message ||
           "Не вдалося перевірити найближче засідання у реєстрі.",
       );
+      setRegistrySuggestionModalOpen(false);
     } finally {
       setRegistrySuggestionLoading(false);
     }
   };
-
-  useEffect(() => {
-    if (!caseItem || isEditing) {
-      return;
-    }
-
-    void loadRegistrySuggestion();
-  }, [caseItem?.id, isEditing]);
 
   const getClientDisplayName = (client: Client): string => {
     const personalName =
@@ -304,8 +345,57 @@ export const CaseDetailsPage: React.FC = () => {
     [caseItem],
   );
 
+  const normalizeRegistryDateToIso = (value?: string | null): string => {
+    if (!value) {
+      return "";
+    }
+
+    const match = value.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
+
+    if (!match) {
+      return "";
+    }
+
+    const [, day, month, year] = match;
+    return `${year}-${month}-${day}`;
+  };
+
+  const registrySuggestionCalendarLink = useMemo(() => {
+    if (!registrySuggestion) {
+      return "";
+    }
+
+    const suggestionDate = normalizeRegistryDateToIso(registrySuggestion.date);
+    const matchedTimelineEvent = timelineDisplayItems.find(
+      (event) =>
+        event.type === "event" &&
+        event.data?.id &&
+        event.date === suggestionDate,
+    );
+
+    if (matchedTimelineEvent?.data?.id) {
+      return buildCalendarEventLink(
+        matchedTimelineEvent.data.id,
+        suggestionDate,
+      );
+    }
+
+    if (suggestionDate) {
+      const params = new URLSearchParams({ date: suggestionDate });
+      return `/calendar?${params.toString()}`;
+    }
+
+    return "/calendar";
+  }, [registrySuggestion, timelineDisplayItems]);
+
   const handleCreateRegistryEvent = async () => {
     if (!id) {
+      return;
+    }
+
+    if (registrySuggestion?.eventAlreadyExists) {
+      setRegistrySuggestionModalOpen(false);
+      navigate(registrySuggestionCalendarLink || "/calendar");
       return;
     }
 
@@ -314,6 +404,7 @@ export const CaseDetailsPage: React.FC = () => {
       setRegistrySuggestionError(null);
       await caseService.createRegistryHearingEvent(id);
       setRegistrySuggestion(null);
+      setRegistrySuggestionModalOpen(false);
       await loadPageData();
     } catch (err: any) {
       setRegistrySuggestionError(
@@ -363,6 +454,24 @@ export const CaseDetailsPage: React.FC = () => {
     );
   }
 
+  const quickActionItems = [
+    {
+      label: "Додати подію",
+      to: `/events/add?caseId=${caseItem.id}`,
+    },
+    {
+      label: "Додати нотатку",
+      to: `/notes?caseId=${caseItem.id}&clientId=${caseItem.clientId}&new=1`,
+    },
+    {
+      label: registrySuggestionLoading
+        ? "Пошук у реєстрі..."
+        : "Знайти засідання в реєстрі",
+      onClick: () => void loadRegistrySuggestion(true),
+      disabled: registrySuggestionLoading,
+    },
+  ];
+
   return (
     <div className="add-case-page case-details-page">
       <Breadcrumbs />
@@ -386,20 +495,13 @@ export const CaseDetailsPage: React.FC = () => {
             >
               Документи
             </Link>
-            <Link
-              to={`/events/add?caseId=${caseItem.id}`}
-              className="btn btn-outline"
-            >
-              <Calendar size={18} />
-              Додати подію
-            </Link>
-            <Link
-              to={`/notes?caseId=${caseItem.id}&clientId=${caseItem.clientId}&new=1`}
-              className="btn btn-outline"
-            >
-              <Pencil size={18} />
-              Додати нотатку
-            </Link>
+            {!isEditing && (
+              <RecordActionsMenu
+                actions={quickActionItems}
+                ariaLabel="Швидкі дії зі справою"
+                triggerLabel="Швидкі дії"
+              />
+            )}
             {!isEditing && (
               <button
                 type="button"
@@ -416,66 +518,6 @@ export const CaseDetailsPage: React.FC = () => {
 
       {error && (
         <Alert type="error" message={error} onClose={() => setError(null)} />
-      )}
-
-      {!isEditing && registrySuggestion && (
-        <Alert
-          type="info"
-          onClose={() => {
-            setRegistrySuggestion(null);
-            setRegistrySuggestionError(null);
-          }}
-        >
-          <div className="registry-hearing-notice">
-            <strong>
-              У реєстрі знайдено запис про найближче засідання у справі.
-            </strong>
-            <span>
-              Дата: {registrySuggestion.date}. Суд:{" "}
-              {registrySuggestion.courtName || "не вказано"}.
-            </span>
-            <span>
-              Пошук виконано{" "}
-              {registrySuggestion.matchedBy.includes("case_number")
-                ? "за номером справи"
-                : "за ПІБ / учасниками"}
-              . Можемо одразу створити подію за цими даними.
-            </span>
-            <div className="registry-hearing-actions">
-              <button
-                type="button"
-                className="btn btn-primary"
-                disabled={registryEventCreating}
-                onClick={handleCreateRegistryEvent}
-              >
-                {registryEventCreating ? "Створення..." : "Створити подію"}
-              </button>
-              <button
-                type="button"
-                className="btn btn-outline"
-                disabled={registrySuggestionLoading}
-                onClick={() => void loadRegistrySuggestion(true)}
-              >
-                {registrySuggestionLoading ? "Перевірка..." : "Оновити пошук"}
-              </button>
-            </div>
-          </div>
-        </Alert>
-      )}
-
-      {!isEditing && !registrySuggestion && (
-        <div className="case-toolbar">
-          <button
-            type="button"
-            className="btn btn-outline"
-            disabled={registrySuggestionLoading}
-            onClick={() => void loadRegistrySuggestion(true)}
-          >
-            {registrySuggestionLoading
-              ? "Пошук у реєстрі..."
-              : "Знайти найближче засідання в реєстрі"}
-          </button>
-        </div>
       )}
 
       {!isEditing && registrySuggestionError && (
@@ -717,18 +759,18 @@ export const CaseDetailsPage: React.FC = () => {
       <section className="form-section case-timeline-section">
         <div className="section-header">
           <Calendar size={20} />
-          <h2>Timeline справи</h2>
+          <h2>Події по справі</h2>
         </div>
 
         {timelineLoading ? (
           <div className="loading-select">
-            <Spinner size="small" /> Завантаження timeline...
+            <Spinner size="small" /> Завантаження подій...
           </div>
-        ) : timeline.length === 0 ? (
-          <div className="case-timeline-empty">Немає подій у timeline</div>
+        ) : timelineDisplayItems.length === 0 ? (
+          <div className="case-timeline-empty">Немає подій по справі</div>
         ) : (
           <div className="case-timeline-list">
-            {timeline.map((event, index) => (
+            {timelineDisplayItems.map((event, index) => (
               <div
                 key={`${event.type}-${event.date}-${index}`}
                 className="case-timeline-item"
@@ -741,13 +783,15 @@ export const CaseDetailsPage: React.FC = () => {
                   })}
                 </div>
                 <div className="case-timeline-body">
-                  <div className="case-timeline-type">
-                    {event.type === "event" ? "Подія" : "Документ"}
-                  </div>
+                  <div className="case-timeline-type">{event.typeLabel}</div>
                   <div className="case-timeline-title">
-                    {event.type === "event"
-                      ? event.data.title
-                      : event.data.originalName}
+                    {event.isClickable ? (
+                      <Link to={event.linkTo} className="case-timeline-link">
+                        {event.title}
+                      </Link>
+                    ) : (
+                      event.title
+                    )}
                   </div>
                   {event.data.description && (
                     <div className="case-timeline-description">
@@ -768,6 +812,35 @@ export const CaseDetailsPage: React.FC = () => {
         createTo={`/notes?caseId=${caseItem.id}&clientId=${caseItem.clientId}&new=1`}
         emptyMessage="Для цієї справи ще немає пов'язаних нотаток."
       />
+
+      {registrySuggestion && (
+        <RegistryHearingPreviewModal
+          isOpen={registrySuggestionModalOpen}
+          date={registrySuggestion.date}
+          courtName={registrySuggestion.courtName}
+          courtRoom={registrySuggestion.courtRoom}
+          caseNumber={
+            registrySuggestion.registryCaseNumber ||
+            registrySuggestion.caseNumber
+          }
+          caseDescription={registrySuggestion.caseDescription}
+          participants={registrySuggestion.caseInvolved}
+          judge={registrySuggestion.judges}
+          sourceHint={
+            registrySuggestion.matchedBy.includes("case_number")
+              ? "Збіг знайдено за номером справи."
+              : "Збіг знайдено за ПІБ / учасниками."
+          }
+          confirmLabel={
+            registrySuggestion.eventAlreadyExists
+              ? "Відкрити в календарі"
+              : "Додати подію"
+          }
+          confirmLoading={registryEventCreating}
+          onConfirm={handleCreateRegistryEvent}
+          onClose={() => setRegistrySuggestionModalOpen(false)}
+        />
+      )}
     </div>
   );
 };

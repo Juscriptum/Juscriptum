@@ -28,6 +28,7 @@ import { NotesModule } from "./notes";
 import { TrustVerificationModule } from "./trust-verification/trust-verification.module";
 import { ExternalDataModule } from "./external-data/external-data.module";
 import { PlatformAdminModule } from "./platform-admin";
+import { DATABASE_ENTITIES } from "./database/entities";
 // import { EnterpriseModule } from './enterprise/enterprise.module';
 import { HealthModule } from "./common/health";
 
@@ -59,17 +60,17 @@ import { HealthModule } from "./common/health";
       useFactory: (configService: ConfigService) => {
         const nodeEnv = configService.get<string>("NODE_ENV", "development");
         const dbType = configService.get<string>("DB_TYPE", "sqlite");
+        const forceSync =
+          configService.get<string>("DB_SYNC", "false") === "true" ||
+          configService.get<string>("DB_SYNC", "false") === "1";
 
         normalizeLegacyDateTimeColumnsForDatabase(dbType);
-
-        // Support both ts-jest (TS sources) and compiled JS runtime.
-        const entitiesPath = `${__dirname}/database/entities/*.entity{.ts,.js}`;
 
         if (dbType === "sqlite" || nodeEnv === "development") {
           return {
             type: "better-sqlite3",
             database: configService.get<string>("DB_NAME", "law_organizer.db"),
-            entities: [entitiesPath],
+            entities: [...DATABASE_ENTITIES],
             synchronize: true, // Enabled for development to auto-create tables
             logging: true,
           };
@@ -91,8 +92,8 @@ import { HealthModule } from "./common/health";
           database:
             configService.get<string>("DATABASE_NAME") ||
             configService.get<string>("DB_NAME", "law_organizer"),
-          entities: [entitiesPath],
-          synchronize: nodeEnv !== "production",
+          entities: [...DATABASE_ENTITIES],
+          synchronize: forceSync || nodeEnv !== "production",
           logging: nodeEnv === "development",
         };
       },

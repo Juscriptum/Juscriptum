@@ -9,6 +9,7 @@ import { Repository, IsNull } from "typeorm";
 import { Case } from "../../database/entities/Case.entity";
 import { Client } from "../../database/entities/Client.entity";
 import { Organization } from "../../database/entities/Organization.entity";
+import { Event } from "../../database/entities/Event.entity";
 import { CreateCaseDto, UpdateCaseDto, CaseFiltersDto } from "../dto/case.dto";
 import { detectSqlInjection } from "../../common/utils/validation.util";
 import { JwtPayload } from "../../auth/interfaces/jwt.interface";
@@ -20,6 +21,35 @@ import {
 } from "../../common/security/access-control";
 import { getSubscriptionLimits } from "../../common/security/subscription-limits";
 import { CaseRegistrySyncService } from "./case-registry-sync.service";
+import {
+  CourtRegistrySearchResult,
+  CourtRegistryService,
+} from "../../clients/services/court-registry.service";
+
+type TimelineEntry =
+  | {
+      type: "event";
+      date: Date | string;
+      data: any;
+    }
+  | {
+      type: "document";
+      date: Date | string;
+      data: any;
+    }
+  | {
+      type: "registry_stage";
+      date: string;
+      data: {
+        source: "court_registry";
+        title: string;
+        description: string;
+        stageDate: string;
+        stageName: string;
+        caseNumber: string;
+        courtName: string;
+      };
+    };
 
 /**
  * Case Service
@@ -35,7 +65,10 @@ export class CaseService {
     private readonly clientRepository: Repository<Client>,
     @InjectRepository(Organization)
     private readonly organizationRepository: Repository<Organization>,
+    @InjectRepository(Event)
+    private readonly eventRepository: Repository<Event>,
     private readonly caseRegistrySyncService: CaseRegistrySyncService,
+    private readonly courtRegistryService: CourtRegistryService,
   ) {}
 
   async getNextCaseNumber(
@@ -232,7 +265,7 @@ export class CaseService {
   }
 
   /**
-   * Get case timeline (events and documents history)
+   * Get case events in reverse chronological order.
    */
   async getTimeline(
     tenantId: string,
@@ -241,24 +274,265 @@ export class CaseService {
   ): Promise<any> {
     const caseEntity = await this.findById(tenantId, id, actor);
 
-    // Combine events and documents into timeline
+    // Keep the case events feed focused on events/stages only.
     const events = caseEntity.events || [];
-    const documents = caseEntity.documents || [];
+    const registryStage = await this.getLatestRegistryStage(caseEntity, events);
 
-    const timeline = [
-      ...events.map((e) => ({
-        type: "event",
-        date: e.eventDate,
-        data: e,
-      })),
-      ...documents.map((d) => ({
-        type: "document",
-        date: d.uploadedAt,
-        data: d,
-      })),
+    const timeline: TimelineEntry[] = [
+      ...events.map(
+        (e) =>
+          ({
+            type: "event",
+            date: e.eventDate,
+            data: e,
+          }) as TimelineEntry,
+      ),
+      ...(registryStage ? [registryStage] : []),
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return timeline;
+  }
+
+  private async getLatestRegistryStage(
+    caseEntity: Case,
+    events: Array<Record<string, any>>,
+  ): Promise<TimelineEntry | null> {
+    const registryCaseNumber = (caseEntity.registryCaseNumber || "").trim();
+
+    if (!registryCaseNumber) {
+      return null;
+    }
+
+    try {
+      const results = await this.courtRegistryService.searchInCourtRegistry({
+        caseNumber: registryCaseNumber,
+      });
+      const latestStage = this.selectLatestRegistryStage(results);
+
+      if (!latestStage) {
+        return null;
+      }
+
+      if (this.isRegistryStageDuplicatedByCourtDate(latestStage, events)) {
+        return null;
+      }
+
+      return {
+        type: "registry_stage",
+        date: this.toTimelineDate(latestStage.stageDate),
+        data: {
+          source: "court_registry",
+          title: latestStage.stageName || "Стадія розгляду",
+          description: [
+            `Дата: ${latestStage.stageDate || "не вказано"}`,
+            latestStage.courtName ? `Суд: ${latestStage.courtName}` : "",
+          ]
+            .filter(Boolean)
+            .join("\n"),
+          stageDate: latestStage.stageDate || "",
+          stageName: latestStage.stageName || "",
+          caseNumber: latestStage.caseNumber || "",
+          courtName: latestStage.courtName || "",
+        },
+      };
+    } catch (error) {
+      this.logger.warn(
+        `Failed to extend case timeline with court registry stage for ${caseEntity.id}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  private selectLatestRegistryStage(
+    results: CourtRegistrySearchResult[],
+  ): CourtRegistrySearchResult | null {
+    const uniqueResults = Array.from(
+      new Map(
+        results
+          .filter(
+            (result) =>
+              result.source === "court_registry" &&
+              ((result.stageDate || "").trim() ||
+                (result.stageName || "").trim()),
+          )
+          .map((result) => [
+            [
+              this.normalizeCaseNumber(result.caseNumber || ""),
+              this.normalizeMeaningfulText(result.stageDate || ""),
+              this.normalizeMeaningfulText(result.stageName || ""),
+            ].join("::"),
+            result,
+          ]),
+      ).values(),
+    );
+
+    if (uniqueResults.length === 0) {
+      return null;
+    }
+
+    return uniqueResults.sort((left, right) => {
+      const rightTimestamp = this.parseRegistryDateValue(right.stageDate);
+      const leftTimestamp = this.parseRegistryDateValue(left.stageDate);
+
+      if (rightTimestamp !== leftTimestamp) {
+        return rightTimestamp - leftTimestamp;
+      }
+
+      return (right.stageName || "").localeCompare(
+        left.stageName || "",
+        "uk-UA",
+      );
+    })[0];
+  }
+
+  private isRegistryStageDuplicatedByCourtDate(
+    stage: CourtRegistrySearchResult,
+    events: Array<Record<string, any>>,
+  ): boolean {
+    return events.some((event) => {
+      if (event.type !== "court_sitting") {
+        return false;
+      }
+
+      if (event.participants?.syncSource !== "court_dates") {
+        return false;
+      }
+
+      const eventTimestamp = this.getEventTimestamp(event);
+      const stageTimestamp = this.getRegistryStageMeaningTimestamp(stage);
+
+      if (
+        eventTimestamp &&
+        stageTimestamp &&
+        eventTimestamp === stageTimestamp &&
+        this.stageNameContainsDate(stage.stageName || "", eventTimestamp)
+      ) {
+        return true;
+      }
+
+      return (
+        this.normalizeMeaningfulText(event.title || "") ===
+        this.normalizeMeaningfulText(stage.stageName || "")
+      );
+    });
+  }
+
+  private getEventTimestamp(event: Record<string, any>): number | null {
+    const dateValue =
+      typeof event.eventDate === "string"
+        ? event.eventDate
+        : event.eventDate instanceof Date
+          ? event.eventDate.toISOString()
+          : "";
+    const baseDate = new Date(dateValue);
+
+    if (Number.isNaN(baseDate.getTime())) {
+      return null;
+    }
+
+    const [hours = "00", minutes = "00"] = String(event.eventTime || "00:00")
+      .split(":")
+      .slice(0, 2);
+    const timestamp = Date.UTC(
+      baseDate.getUTCFullYear(),
+      baseDate.getUTCMonth(),
+      baseDate.getUTCDate(),
+      Number(hours),
+      Number(minutes),
+      0,
+      0,
+    );
+
+    return Number.isNaN(timestamp) ? null : timestamp;
+  }
+
+  private stageNameContainsDate(value: string, timestamp: number): boolean {
+    const date = new Date(timestamp);
+    const formattedDate = `${String(date.getUTCDate()).padStart(2, "0")}.${String(
+      date.getUTCMonth() + 1,
+    ).padStart(2, "0")}.${date.getUTCFullYear()}`;
+    const formattedDateTime = `${formattedDate} ${String(
+      date.getUTCHours(),
+    ).padStart(2, "0")}:${String(date.getUTCMinutes()).padStart(2, "0")}`;
+    const normalizedValue = this.normalizeMeaningfulText(value);
+
+    return (
+      normalizedValue.includes(this.normalizeMeaningfulText(formattedDate)) ||
+      normalizedValue.includes(this.normalizeMeaningfulText(formattedDateTime))
+    );
+  }
+
+  private getRegistryStageMeaningTimestamp(
+    stage: CourtRegistrySearchResult,
+  ): number {
+    const stageNameTimestamp = this.extractEmbeddedRegistryDateValue(
+      stage.stageName || "",
+    );
+
+    if (Number.isFinite(stageNameTimestamp)) {
+      return stageNameTimestamp;
+    }
+
+    return this.parseRegistryDateValue(stage.stageDate);
+  }
+
+  private toTimelineDate(value: string): string {
+    const timestamp = this.parseRegistryDateValue(value);
+
+    return Number.isFinite(timestamp)
+      ? new Date(timestamp).toISOString()
+      : new Date(0).toISOString();
+  }
+
+  private parseRegistryDateValue(value?: string): number {
+    const match = (value || "")
+      .trim()
+      .match(/^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?$/);
+
+    if (!match) {
+      return Number.NEGATIVE_INFINITY;
+    }
+
+    return Date.UTC(
+      Number(match[3]),
+      Number(match[2]) - 1,
+      Number(match[1]),
+      Number(match[4] || "0"),
+      Number(match[5] || "0"),
+      Number(match[6] || "0"),
+      0,
+    );
+  }
+
+  private extractEmbeddedRegistryDateValue(value: string): number {
+    const match = value.match(
+      /(\d{2}\.\d{2}\.\d{4}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)/,
+    );
+
+    if (!match) {
+      return Number.NEGATIVE_INFINITY;
+    }
+
+    return this.parseRegistryDateValue(match[1]);
+  }
+
+  private normalizeMeaningfulText(value: string): string {
+    return value
+      .toLocaleLowerCase("uk-UA")
+      .replace(/[‐‑‒–—―]/g, "-")
+      .replace(/[.,;:!?()"'`«»]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  private normalizeCaseNumber(value: string): string {
+    return value
+      .trim()
+      .replace(/\s+/g, "")
+      .replace(/[‐‑‒–—―]/g, "-")
+      .toLocaleLowerCase("uk-UA");
   }
 
   /**
@@ -383,6 +657,7 @@ export class CaseService {
     if (dto.courtFee !== undefined) caseEntity.courtFee = dto.courtFee;
     if (dto.paidAmount !== undefined) caseEntity.paidAmount = dto.paidAmount;
     if (dto.accessScope) caseEntity.accessScope = dto.accessScope;
+    if (dto.status) caseEntity.status = dto.status;
 
     // Handle date fields
     if (dto.startDate) {
@@ -400,7 +675,29 @@ export class CaseService {
 
     caseEntity.updatedBy = userId;
 
-    const savedCase = await this.caseRepository.save(caseEntity);
+    const savedCase =
+      caseEntity.status === "archived"
+        ? await this.caseRepository.manager.transaction(async (manager) => {
+            const caseRepository = manager.getRepository(Case);
+            const eventRepository = manager.getRepository(Event);
+            const archivedCase = await caseRepository.save(caseEntity);
+
+            await eventRepository.update(
+              {
+                tenantId,
+                caseId: id,
+                deletedAt: IsNull(),
+              },
+              {
+                status: "archived",
+                updatedBy: userId,
+              },
+            );
+
+            return archivedCase;
+          })
+        : await this.caseRepository.save(caseEntity);
+
     await this.syncRegistryArtifacts(savedCase, userId);
     return savedCase;
   }
@@ -675,15 +972,33 @@ export class CaseService {
     userId: string,
     actor?: JwtPayload,
   ): Promise<void> {
-    const caseEntity = await this.findById(tenantId, id, actor);
+    await this.findById(tenantId, id, actor);
+    const deletedAt = new Date();
 
-    await this.caseRepository.update(
-      { id, tenantId },
-      {
-        deletedAt: new Date(),
-        updatedBy: userId,
-      },
-    );
+    await this.caseRepository.manager.transaction(async (manager) => {
+      const caseRepository = manager.getRepository(Case);
+      const eventRepository = manager.getRepository(Event);
+
+      await caseRepository.update(
+        { id, tenantId },
+        {
+          deletedAt,
+          updatedBy: userId,
+        },
+      );
+
+      await eventRepository.update(
+        {
+          tenantId,
+          caseId: id,
+          deletedAt: IsNull(),
+        },
+        {
+          deletedAt,
+          updatedBy: userId,
+        },
+      );
+    });
   }
 
   /**
@@ -731,7 +1046,29 @@ export class CaseService {
       caseEntity.endDate = new Date();
     }
 
-    return this.caseRepository.save(caseEntity);
+    if (status !== "archived") {
+      return this.caseRepository.save(caseEntity);
+    }
+
+    return this.caseRepository.manager.transaction(async (manager) => {
+      const caseRepository = manager.getRepository(Case);
+      const eventRepository = manager.getRepository(Event);
+      const archivedCase = await caseRepository.save(caseEntity);
+
+      await eventRepository.update(
+        {
+          tenantId,
+          caseId: id,
+          deletedAt: IsNull(),
+        },
+        {
+          status: "archived",
+          updatedBy: userId,
+        },
+      );
+
+      return archivedCase;
+    });
   }
 
   /**

@@ -5,7 +5,163 @@
 ## Snapshot Date
 
 - Updated: 2026-03-22
-- Scope: platform-admin architecture planning and scaffold, separate owner back-office frontend entry, backend blueprint module, dedicated platform-admin auth model, first-owner bootstrap, MFA enrollment surface, safe read-only platform-admin dashboard/organizations metadata layer, shared health module extraction, project/docs alignment, plus the prior local resource audit and runtime/git cleanup, day-one scope decision, staging prep pack, staging env template alignment, launch-readiness status refresh, non-code launch blocker mapping, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, archive page category tabs, event archive cascades, calendar archived toggle, client registry search overlay fit/autofill polish, mobile scan-session/PDF foundation, authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage, the repo-local Law Organizer UI audit skill, the approved frontend UI consistency implementation pass, the canonical shared registry layer for clients/cases/calculations/documents, the dedicated ASVP SQLite cache split, and the ASVP yearly shard migration plus storage cleanup
+- Scope: platform-admin architecture planning and scaffold, separate owner back-office frontend entry, backend blueprint module, dedicated platform-admin auth model, first-owner bootstrap, MFA enrollment surface, safe read-only platform-admin dashboard/organizations metadata layer, organization settings registry import metadata panel, read-only client/event contact linkification, local/VPS operational sync rule, live VPS sync default for sessions with explicit server access, shared health module extraction, project/docs alignment, plus the prior local resource audit and runtime/git cleanup, day-one scope decision, staging prep pack, staging env template alignment, launch-readiness status refresh, non-code launch blocker mapping, backend security status reconciliation, auth/session hardening, PostgreSQL RLS runtime/policy hardening, PII encryption/blind-index hardening, trust verification workflow/worker hardening, live-capable provider integrations, signed callback/replay protection hardening, malware scanning lifecycle hardening, operational monitoring/readiness hardening, staging/operator runbooks for blind-index rotation and production backfill rehearsal, frontend auth/session persistence, lint/build pipeline, e2e stability, product/docs alignment, user-scoped data isolation, Ukrainian trust-provider foundation, workspace cleanup, calendar workspace rebuild, client/case list filtering, global frontend shell compaction, MacBook-first CRM registry redesign, registry minimalism pass, calendar add-event entry point, route-backed pricelists module, two-step registration split, dynamic universal profile form, browser-tab favicon refresh, template registry/A4 builder, template builder density pass, template variable audit, sticky/collapsible variables rail, Ukrainian TinyMCE localization, legal-entity user placeholders, compact two-row rich-text toolbar, sticky long-form actions, unified three-dots row actions, unified notes workspace, reverse note flows from client/case surfaces, notes ERP registry pass, global actions overlay fix, route-based calculations create/read flow, restored income-calculation pricelist binding, restored shared profile-form source for frontend build verification, multi-pricelist income calculations, act-style calculation tables, total-in-words formatting, persisted calculation item unit metadata, currency-display normalization to `грн`, document `calculation.totalAmountWords` correction, files workspace explorer/list redesign, route-based document generation, archive page category tabs, event archive cascades, calendar archived toggle, client registry search overlay fit/autofill polish, mobile scan-session/PDF foundation, authenticated mobile responsiveness hardening with a top-triggered drawer plus viewport regression coverage, the repo-local Law Organizer UI audit skill, the approved frontend UI consistency implementation pass, the canonical shared registry layer for clients/cases/calculations/documents, the dedicated ASVP SQLite cache split, and the ASVP yearly shard migration plus storage cleanup
+
+## 2026-03-22 Live VPS Sync Default For Explicit Access Sessions
+
+- Updated:
+  - `AGENTS.md`
+  - `RUN.md`
+  - `CLAUDE.md`
+- Operational behavior now:
+  - when the user has explicitly provided current-session VPS access and expects a live server-visible result, local changes and the corresponding VPS update are treated as one completion target
+  - expected completion in that mode is: local fix, matching VPS sync/update, affected service rebuild/restart, and live verification when feasible
+  - plaintext passwords, tokens, and private keys are intentionally excluded from repo docs and versioned files; only the operational workflow is documented
+- Verification run in this session:
+  - documentation-only change
+  - no build/test command was needed
+
+## 2026-03-22 Case Participant Roles Expanded With Explicit Representative Options
+
+- Updated:
+  - `src/frontend/utils/caseParticipants.ts`
+  - `src/frontend/utils/caseParticipants.spec.ts`
+  - `CLAUDE.md`
+- UI/runtime behavior now:
+  - the participant role selector in case forms still uses the current single-role dropdown plus manual `Інше` entry
+  - representative support is implemented as explicit selectable roles instead of a separate checkbox/submenu, which keeps stored role strings ready for documents, templates, and exports
+  - judicial/enforcement, criminal/admin, registration/property, and mediation now expose expanded role catalogs with representative variants
+  - criminal/admin additionally now includes `Захисник`
+  - mediation now includes `Медіатор`
+  - representative plaintiff/defendant labels still map into the legacy side fields used in other parts of the app
+- Verification run in this session:
+  - `npm test -- --runInBand src/frontend/utils/caseParticipants.spec.ts` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Read-Only Client/Event Contacts Open Phone And Mail Apps
+
+- Updated:
+  - `src/frontend/components/ContactText.tsx`
+  - `src/frontend/components/ContactText.css`
+  - `src/frontend/pages/clients/ClientDetailsPage.tsx`
+  - `src/frontend/pages/calendar/CalendarPage.tsx`
+  - `CLAUDE.md`
+- Runtime behavior now:
+  - the client details screen renders primary and additional phone/email fields as clickable `tel:` and `mailto:` links in read-only mode
+  - the calendar event details modal now linkifies the responsible-contact value when it contains a phone number or email
+  - this is a frontend-only behavior change, so it applies equally to local and VPS after the updated frontend bundle is deployed
+  - case details currently do not show standalone phone/email fields in read-only mode, so no case-detail UI change was needed
+- Verification run in this session:
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Registry Search Excludes `court_dates` And Case Prefill Restores Roles
+
+- Updated:
+  - `src/clients/services/court-registry.service.ts`
+  - `src/clients/services/court-registry.service.spec.ts`
+  - `src/cases/controllers/cases.controller.ts`
+  - `src/clients/controllers/clients.controller.ts`
+  - `src/frontend/pages/cases/AddCasePage.tsx`
+  - `src/frontend/pages/events/AddEventPage.tsx`
+  - `src/frontend/types/case.types.ts`
+  - `src/frontend/utils/caseRegistryPrefill.ts`
+  - `src/frontend/utils/caseRegistryPrefill.spec.ts`
+  - `CLAUDE.md`
+- Runtime behavior now:
+  - the combined registry-search endpoints for clients/cases now search only `court_registry` (`court_stan`) and `asvp`
+  - explicit `source=court_dates` is rejected there, so `court_dates` stays dedicated to nearest-hearing lookups for a selected case
+  - add-case registry prefills now preserve the selected person's registry role in participants and no longer lose the client side during ASVP-based case creation
+  - add-event registry lookup now requires a selected case and uses only the case-specific nearest-hearing suggestion path
+- Verification run in this session:
+  - `npm test -- --runInBand src/clients/services/court-registry.service.spec.ts src/frontend/utils/caseRegistryPrefill.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 Frontend Nginx Re-Resolves Backend Container DNS
+
+- Updated:
+  - `nginx.conf`
+  - `RUN.md`
+  - `CLAUDE.md`
+- Runtime/deployment behavior now:
+  - frontend nginx now resolves `backend` through Docker DNS (`127.0.0.11`) at request time instead of staying pinned to the backend container IP from nginx startup
+  - recreating the backend container on VPS no longer requires a manual frontend restart to stop `/api/*` from returning `502 Bad Gateway`
+  - the general `/api/*` proxy path now rewrites `/api/...` to `/v1/...` before proxying, so variable-based upstream routing no longer collapses requests into the bare `/v1/` root
+  - `/api/health` now proxies to backend `/health`, and `/api/readiness` now proxies to backend `/readiness`, instead of incorrectly inheriting the `/v1/*` API prefix
+- Live VPS verification in this session:
+  - immediate hotfix `docker compose -f docker-compose.yml -f docker-compose.vps.yml restart frontend` restored proxying to the current backend container
+  - `https://www.juscriptum.online/api/clients?limit=20&page=1` -> `401 Unauthorized` instead of `502`
+  - `https://www.juscriptum.online/api/organizations/onboarding` -> `401 Unauthorized` instead of `502`
+  - after redeploying the rebuilt frontend image, `https://www.juscriptum.online/api/health` -> `200 OK`
+  - after a forced backend recreate with no frontend restart, `https://www.juscriptum.online/api/clients?limit=20&page=1` -> `401 Unauthorized` and backend path `/v1/clients`, which confirms the stale-DNS and path-collapse issues are both resolved
+
+## 2026-03-22 Local/VPS Operational Sync Rule
+
+- Updated:
+  - `RUN.md`
+  - `CLAUDE.md`
+- Operational behavior now:
+  - the technical docs now explicitly require parity between local and VPS for non-machine-specific runtime and deployment behavior
+  - if a runtime/deployment change is made locally, the corresponding VPS change must also be applied
+  - if a runtime/deployment hotfix is made directly on the VPS, the equivalent repo/docs change must be brought back locally
+  - only secrets, host-specific values, certificates, caches, logs, data files, and other generated artifacts are allowed to differ
+- Verification run in this session:
+  - documentation-only change
+  - no build/test command was needed
+
+## 2026-03-22 Organization Settings Show Registry Import Metadata
+
+- Updated:
+  - `src/registry-index/services/registry-index.service.ts`
+  - `src/registry-index/services/registry-index.service.spec.ts`
+  - `src/auth/auth.module.ts`
+  - `src/auth/controllers/organization.controller.ts`
+  - `src/frontend/types/organization.types.ts`
+  - `src/frontend/services/organization.service.ts`
+  - `src/frontend/pages/settings/SettingsPage.tsx`
+  - `src/frontend/pages/settings/SettingsPage.css`
+  - `CLAUDE.md`
+- Runtime behavior now:
+  - admin/owner settings now include a dedicated registry-status panel instead of hiding registry freshness in logs or SQLite only
+  - backend exposes `GET /v1/organizations/me/registry-imports` and returns one summary per indexed source: `court_stan`, `court_dates`, `asvp`
+  - each summary includes known dataset/resource URLs, remote dataset update time, last download/index/success timestamps, row counts, last error text, and whether the index is currently usable for search
+  - the frontend keeps organization settings usable even if this metadata call fails, and shows a warning inside the panel instead of breaking the whole page
+- Verification run in this session:
+  - `npm test -- --runInBand src/registry-index/services/registry-index.service.spec.ts` -> PASS
+  - `npm run build` -> PASS
+  - `npm run build:frontend` -> PASS
+
+## 2026-03-22 VPS Bootstrap And Runtime Hardening For Fresh Postgres Deploys
+
+- Updated:
+  - `.dockerignore`
+  - `Dockerfile`
+  - `docker-compose.yml`
+  - `nginx.conf`
+  - `src/app.module.ts`
+  - `src/migrations/data-source.ts`
+  - `src/database/entities/index.ts`
+  - `src/billing/services/stripe.service.ts`
+  - `src/common/health/operational-monitoring.service.ts`
+  - `CLAUDE.md`
+  - `RUN.md`
+- Runtime/deployment behavior now:
+  - Docker builds no longer send giant local-only directories like `asvp`, `.venv*`, `figma`, or `.codex` into the context, which was the main reason VPS rebuilds had ballooned into multi-gigabyte transfers
+  - backend/runtime startup now uses an explicit `DATABASE_ENTITIES` list so the legacy postgres datetime normalization applies consistently to runtime and migration data source initialization
+  - migration discovery now ignores `*.spec` files
+  - `DB_SYNC=true` is now a supported one-time bootstrap override for fresh PostgreSQL startup, and `docker-compose.yml` passes `DB_SYNC` into backend and worker containers
+  - Stripe misconfiguration now degrades billing instead of crashing the whole backend during Nest bootstrap
+  - readiness now treats missing enterprise `Outbox` metadata as `disabled` instead of throwing `EntityMetadataNotFoundError`
+  - frontend nginx now writes its PID under `/tmp/nginx.pid`, which fixes the non-root frontend container on VPS
+  - backend image now pre-creates `/app/storage` and avoids the previous recursive chmod across the whole app tree
+- Live VPS verification in this session:
+  - `https://www.juscriptum.online/` -> `200 OK`
+  - `http://127.0.0.1:3000/health` -> `200 OK`
+  - `http://127.0.0.1:8080/` -> `200 OK`
+  - `http://127.0.0.1:3000/readiness` -> `503` with JSON payload `status: "degraded"` because `outbox` monitoring is `disabled`; app/database/redis were all `ok`
+  - VPS `docker compose ps` showed healthy backend and frontend containers after the final rebuild
+- Current caveat:
+  - the checked-in PostgreSQL migration chain still does not fully create a brand-new empty schema from zero, so first boot on a fresh Postgres DB currently depends on a one-time `DB_SYNC=true` start before switching back to `DB_SYNC=false`
 
 ## 2026-03-22 Postgres Runtime Normalizes Legacy datetime Entity Types
 
@@ -190,6 +346,7 @@
   - indexed ASVP reads aggregate across yearly shard DBs
   - automatic `data.gov.ua` download plus scheduled rebuild still use the same `ExternalDataService -> rebuildIndexes({ source: 'asvp' })` path from the worker/scheduler flow
   - `ExternalDataService` now writes remote `ASVP` content into `asvp/split/asvp-YYYY.csv`; for the current large `data.gov.ua` ZIP payload it prefers a resumable temp archive assembled via `Range` chunks in the OS temp directory before the yearly split step, so the workspace still avoids keeping a full raw `ASVP` CSV while the download path survives mid-transfer resets better than a single long-lived direct stream or monolithic curl resume run
+  - `RegistryIndexService` now stages large ASVP shard rebuilds in `storage/asvp-index-shards.build`, closes shard DBs per processed source file instead of keeping WAL-heavy writers open until the very end, trims ASVP FTS to normalized name columns only, and progressively deletes completed `asvp/split/asvp-YYYY.csv` files when source cleanup is enabled so peak disk usage stays lower during a long rebuild
   - explicit regression coverage now verifies that `ExternalDataService` downloads an `asvp` CSV and invokes `rebuildIndexes({ source: "asvp" })`, which is the automatic worker/scheduler handoff
   - the registry importer and source monitor now recurse into nested `split/` folders, so streamed `asvp/split/*.csv` files are discovered and retried automatically
   - one-off helper scripts now load `.env` and `.env.local` directly, with `.env.local` taking precedence, so `npm run update:external-data` sees the same external-data settings as the main Nest runtime
@@ -4757,3 +4914,88 @@
 
 ## Risks / Guardrails
 - The existing-event calendar routing in the case card currently resolves the matching event from the loaded case timeline by date, so if multiple events share the same date in one case it may route to that date without a perfect one-to-one event-id match.
+
+### 2026-03-22 Auth Login/Register 500 On VPS
+
+## Current Snapshot
+- `https://www.juscriptum.online` stayed up, but auth requests started failing with `500 Internal Server Error` on both login and registration.
+- VPS backend logs showed:
+  - `POST /v1/auth/login 500`
+  - `POST /v1/auth/register 500`
+- The crashing stack pointed into TypeORM `SelectQueryBuilder.executeEntitiesAndRawResults(...)`, not the auth business logic itself.
+
+## Technical State
+- Root cause was the Postgres RLS query-runner monkey patch in `src/common/interceptors/rls.interceptor.ts`.
+- TypeORM's Postgres path uses `queryRunner.query(sql, parameters, true)` for structured query results and then reads `results.records`.
+- The patch had been forwarding only `(query, parameters)`, which stripped the `useStructuredResult` argument and made TypeORM receive raw rows instead of the structured `QueryResult`.
+- That mismatch produced `undefined` for `rawResults` inside `SelectQueryBuilder`, which then crashed on `rawResults.length`.
+- Fixed `src/common/interceptors/rls.interceptor.ts` to preserve and forward `useStructuredResult`.
+- Extended `src/common/interceptors/rls.interceptor.spec.ts` with coverage for structured-result passthrough so future RLS work keeps the TypeORM contract intact.
+
+## Validation Status
+- `npm test -- --runInBand src/common/interceptors/rls.interceptor.spec.ts` -> PASS
+- `npm run build` -> PASS
+
+## Risks / Guardrails
+- This verification proves the local patch and TypeORM contract restoration; it does not by itself prove the live VPS until the changed files are synced and the backend container is rebuilt/restarted there.
+
+### 2026-03-22 VPS Registry Search Used Empty Container Cache
+
+## Current Snapshot
+- Client/case registry search on the VPS was not using the real indexed datasets even though the host already had a populated `storage/registry-index.db`.
+- The host cache contained real data (`court_stan` and `court_dates`), but the backend container saw only a freshly created tiny SQLite file inside its own `/app/storage`.
+
+## Technical State
+- Root cause was deployment configuration, not the search code:
+  - the VPS had `storage/registry-index.db` and `storage/asvp-index.db` on the host
+  - `docker-compose.vps.yml` did not bind-mount `./storage` into `/app/storage`
+  - backend/worker therefore booted with empty container-local caches and searched those instead of the host index
+- Added repo-local `docker-compose.vps.yml` with:
+  - `backend -> volumes: ./storage:/app/storage`
+  - `redis-worker -> volumes: ./storage:/app/storage`
+- Updated `RUN.md` to document that Docker/VPS deployments must mount the shared `storage` directory or registry search will silently query an empty cache.
+- On the live VPS:
+  - updated `docker-compose.vps.yml`
+  - aligned `storage` ownership to container uid/gid `1001:1001`
+  - recreated backend and worker containers
+
+## Validation Status
+- Live VPS verification after the compose change:
+  - backend `/app/storage/registry-index.db` now points to the populated host file (`~1.6G` instead of an empty `4KB` file)
+  - backend direct SQLite check returned:
+    - `court_registry_participants = 812350`
+    - `court_dates = 487693`
+  - `GET /v1/clients/court-registry/search?query=Ковцун` -> returned real `court_registry` and `court_dates` rows
+  - `GET /v1/cases/registry-search?caseNumber=2/206-214/б&source=court_registry` -> returned matching case rows
+
+## Risks / Guardrails
+- The current VPS host cache still has no visible `storage/asvp-index-shards/`, so ASVP search is only proven insofar as the current host cache state supports it; the confirmed live restoration in this session is for `court_stan` and `court_dates`.
+
+### 2026-03-22 Indexed `court_dates` Misses No Longer Crash On Missing Raw Directory
+
+## Current Snapshot
+- VPS hearing suggestion / manual hearing search could still fail with:
+  - `Каталог дат судових засідань не знайдено. Очікувався \`court_dates\` у корені проєкту.`
+- This happened even after shared `storage/registry-index.db` was mounted and already contained imported `court_dates` rows.
+
+## Technical State
+- Root cause lived in `src/clients/services/court-registry.service.ts`:
+  - indexed lookups ran first
+  - when they returned no match, `searchCourtDates(...)` and `findCourtDatesByCaseNumbers(...)` still forced a raw-directory fallback through `resolveDirectory(...)`
+  - indexed VPS deployments often keep only the imported SQLite cache and no raw `court_dates/` snapshot, so the fallback raised `NotFoundException`
+- Updated `src/clients/services/court-registry.service.ts` so indexed runtimes now:
+  - return `[]` from `searchCourtDates(...)` when the raw `court_dates/` directory is absent
+  - return an empty `Map` from `findCourtDatesByCaseNumbers(...)` under the same condition
+  - log a warning instead of surfacing a user-facing crash
+- Non-indexed raw-file runtimes still keep the strict `NotFoundException` behavior.
+- Expanded `src/clients/services/court-registry.service.spec.ts` with:
+  - indexed search miss + missing raw directory -> `[]`
+  - indexed batch miss + missing raw directory -> empty `Map`
+
+## Validation Status
+- `npm test -- --runInBand src/clients/services/court-registry.service.spec.ts` -> PASS
+- `npm run build` -> PASS
+
+## Risks / Guardrails
+- This removes the VPS crash path, but it does not magically create a registry suggestion when the indexed `court_dates` dataset genuinely has no matching hearing row for that case/person.
+- If a case already has a previously synced timeline event but the shared registry index no longer contains that row, the UI will now degrade to “no suggestion found” instead of throwing the raw-directory error.

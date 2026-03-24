@@ -32,7 +32,35 @@ describe("RlsQueryRunnerPatcher", () => {
       expect.stringContaining("set_config('app.current_tenant_id'"),
       ["tenant-1", "user-1", "lawyer"],
     );
-    expect(query).toHaveBeenNthCalledWith(2, "SELECT 42", undefined);
+    expect(query).toHaveBeenNthCalledWith(2, "SELECT 42", undefined, undefined);
+  });
+
+  it("preserves TypeORM structured-result queries after applying RLS context", async () => {
+    const query = jest.fn().mockResolvedValue({ records: [] });
+    const release = jest.fn().mockResolvedValue(undefined);
+    const queryRunner = { query, release } as any;
+    const dataSource = {
+      options: { type: "postgres" },
+      createQueryRunner: jest.fn(() => queryRunner),
+    } as unknown as DataSource;
+    const contextStore = new RlsContextStore();
+    const patcher = new RlsQueryRunnerPatcher(dataSource, contextStore);
+
+    patcher.onModuleInit();
+
+    const patchedQueryRunner = dataSource.createQueryRunner();
+    await patchedQueryRunner.query("SELECT * FROM users", ["user-1"], true);
+
+    expect(query).toHaveBeenNthCalledWith(
+      1,
+      expect.stringContaining("set_config('app.current_tenant_id', '', false)"),
+    );
+    expect(query).toHaveBeenNthCalledWith(
+      2,
+      "SELECT * FROM users",
+      ["user-1"],
+      true,
+    );
   });
 
   it("clears stale RLS context when no authenticated request context exists", async () => {
@@ -55,6 +83,11 @@ describe("RlsQueryRunnerPatcher", () => {
       1,
       expect.stringContaining("set_config('app.current_tenant_id', '', false)"),
     );
-    expect(query).toHaveBeenNthCalledWith(2, "SELECT now()", undefined);
+    expect(query).toHaveBeenNthCalledWith(
+      2,
+      "SELECT now()",
+      undefined,
+      undefined,
+    );
   });
 });

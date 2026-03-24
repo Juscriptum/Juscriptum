@@ -23,14 +23,6 @@
     box-shadow: 0 20px 46px rgba(37, 99, 235, 0.08);
 }
 
-.calculations-registry {
-    border: 1px solid rgba(16, 25, 38, 0.07);
-    border-radius: 0.85rem;
-    background: #ffffff;
-    box-shadow: 0 1px 2px rgba(16, 25, 38, 0.04);
-    overflow: hidden;
-}
-
 .calculations-panel__header {
     display: flex;
     align-items: flex-start;
@@ -56,61 +48,7 @@
         auto;
 }
 
-.filters-bar {
-    display: grid;
-    gap: 0.5rem;
-    padding: 0.65rem;
-    border-bottom: 1px solid rgba(16, 25, 38, 0.06);
-    background: #f8fafc;
-}
-
-.search-box {
-    display: flex;
-    align-items: center;
-    gap: 0.55rem;
-    min-width: 0;
-    height: 2.15rem;
-    padding: 0 0.72rem;
-    background: #ffffff;
-    border: 1px solid rgba(16, 25, 38, 0.08);
-    border-radius: 0.72rem;
-}
-
-.search-box input {
-    width: 100%;
-    border: none;
-    background: transparent;
-    outline: none;
-    font-size: var(--text-sm);
-    font-family: var(--font-sans);
-}
-
-.filters-date-range {
-    display: flex;
-    flex-direction: column;
-    gap: 0.22rem;
-}
-
-.filters-date-range__label {
-    font-size: 0.6rem;
-    font-weight: 800;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: var(--color-ink-500);
-}
-
-.filters-bar select {
-    min-width: 0;
-    height: 2.15rem;
-    padding: 0 0.72rem;
-    border: 1px solid rgba(16, 25, 38, 0.08);
-    border-radius: 0.72rem;
-    background: #ffffff;
-    font-size: var(--text-sm);
-    font-family: var(--font-sans);
-}
-
-.filters-reset-btn {
+.calculations-page .filters-reset-btn {
     align-self: end;
 }
 
@@ -258,7 +196,7 @@
 
 .calculation-number-pill,
 .calculation-operation,
-.badge {
+.calculations-page .badge {
     display: inline-flex;
     align-items: center;
     min-height: 1.32rem;
@@ -383,8 +321,8 @@
         grid-template-columns: repeat(4, minmax(0, 1fr));
     }
 
-    .calculations-filters .search-box,
-    .calculations-filters .filters-date-range {
+    .calculations-filters .registry-search-field,
+    .calculations-filters .registry-filter-group {
         grid-column: span 2;
     }
 }
@@ -394,8 +332,8 @@
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .calculations-filters .search-box,
-    .calculations-filters .filters-date-range {
+    .calculations-filters .registry-search-field,
+    .calculations-filters .registry-filter-group {
         grid-column: span 2;
     }
 
@@ -428,8 +366,8 @@
         grid-template-columns: 1fr;
     }
 
-    .calculations-filters .search-box,
-    .calculations-filters .filters-date-range {
+    .calculations-filters .registry-search-field,
+    .calculations-filters .registry-filter-group {
         grid-column: auto;
     }
 

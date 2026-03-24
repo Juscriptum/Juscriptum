@@ -10,6 +10,16 @@ export { PageHeader } from "./PageHeader";
 export { FormActionBar } from "./FormActionBar";
 export { RegistrySearchOverlay } from "./RegistrySearchOverlay";
 export {
+  RegistryEmptyState,
+  RegistryFilterBar,
+  RegistryFilterGroup,
+  RegistryLoadingState,
+  RegistryPagination,
+  RegistrySearchField,
+  RegistrySurface,
+  RegistryTableShell,
+} from "./registry";
+export {
   UpgradePrompt,
   FeatureLockedOverlay,
   PlanBadge,

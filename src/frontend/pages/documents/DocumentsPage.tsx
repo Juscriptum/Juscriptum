@@ -14,10 +14,18 @@ import {
   Upload,
 } from "lucide-react";
 import { Alert } from "../../components/Alert";
-import { Spinner } from "../../components/Spinner";
 import { PageHeader } from "../../components/PageHeader";
 import { Breadcrumbs } from "../../components/navigation";
 import { RecordActionsMenu } from "../../components/RecordActionsMenu";
+import {
+  RegistryEmptyState,
+  RegistryFilterBar,
+  RegistryLoadingState,
+  RegistryPagination,
+  RegistrySearchField,
+  RegistrySurface,
+  RegistryTableShell,
+} from "../../components/registry";
 import { caseService } from "../../services/case.service";
 import { clientService } from "../../services/client.service";
 import documentService from "../../services/document.service";
@@ -764,17 +772,14 @@ export const DocumentsPage: React.FC = () => {
         <Alert type="error" message={error} onClose={() => setError(null)} />
       )}
 
-      <section className="content-surface documents-shell">
+      <RegistrySurface className="documents-shell">
         <div className="documents-toolbar">
-          <div className="filters-bar documents-filters">
-            <div className="search-box">
-              <input
-                type="text"
-                placeholder="Пошук файлів..."
-                value={filters.search || ""}
-                onChange={(event) => handleSearch(event.target.value)}
-              />
-            </div>
+          <RegistryFilterBar className="documents-filters">
+            <RegistrySearchField
+              placeholder="Пошук файлів..."
+              value={filters.search || ""}
+              onChange={handleSearch}
+            />
             <select
               value={filters.type || ""}
               onChange={(event) =>
@@ -817,10 +822,11 @@ export const DocumentsPage: React.FC = () => {
                 </option>
               ))}
             </select>
-          </div>
+          </RegistryFilterBar>
 
           <div className="documents-view-toggle">
             <button
+              type="button"
               className={viewMode === "icons" ? "active" : ""}
               onClick={() => setViewMode("icons")}
               title="Іконки"
@@ -829,6 +835,7 @@ export const DocumentsPage: React.FC = () => {
               <span>Іконки</span>
             </button>
             <button
+              type="button"
               className={viewMode === "list" ? "active" : ""}
               onClick={() => setViewMode("list")}
               title="Список"
@@ -840,9 +847,7 @@ export const DocumentsPage: React.FC = () => {
         </div>
 
         {loading || contextLoading || supportLoading ? (
-          <div className="loading-container">
-            <Spinner size="large" />
-          </div>
+          <RegistryLoadingState />
         ) : viewMode === "icons" ? (
           <div className="documents-icons-view">
             {folderPath.length > 0 && (
@@ -925,16 +930,16 @@ export const DocumentsPage: React.FC = () => {
                 ))}
               </div>
             ) : folderPath.length > 0 || iconFolders.length === 0 ? (
-              <div className="empty-state">
-                <ScanLine size={56} />
-                <h3>У цій папці поки немає файлів</h3>
-                <p>Створіть документ, завантажте файл або додайте скан.</p>
-              </div>
+              <RegistryEmptyState
+                icon={<ScanLine size={56} />}
+                title="У цій папці поки немає файлів"
+                description="Створіть документ, завантажте файл або додайте скан."
+              />
             ) : null}
           </div>
         ) : (
           <>
-            <div className="documents-table">
+            <RegistryTableShell className="documents-table">
               <table>
                 <thead>
                   <tr>
@@ -1033,36 +1038,24 @@ export const DocumentsPage: React.FC = () => {
                   })}
                 </tbody>
               </table>
-            </div>
+            </RegistryTableShell>
 
             {totalPages > 1 && (
-              <div className="pagination">
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === 1}
-                  onClick={() =>
-                    setFilters((current) => ({ ...current, page: page - 1 }))
-                  }
-                >
-                  Попередня
-                </button>
-                <span className="page-info">
-                  Сторінка {page} з {totalPages} ({total} записів)
-                </span>
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === totalPages}
-                  onClick={() =>
-                    setFilters((current) => ({ ...current, page: page + 1 }))
-                  }
-                >
-                  Наступна
-                </button>
-              </div>
+              <RegistryPagination
+                page={page}
+                totalPages={totalPages}
+                totalItems={total}
+                onPrevious={() =>
+                  setFilters((current) => ({ ...current, page: page - 1 }))
+                }
+                onNext={() =>
+                  setFilters((current) => ({ ...current, page: page + 1 }))
+                }
+              />
             )}
           </>
         )}
-      </section>
+      </RegistrySurface>
     </div>
   );
 };

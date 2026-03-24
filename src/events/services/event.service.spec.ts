@@ -12,6 +12,17 @@ describe("EventService", () => {
   let eventRepository: jest.Mocked<Repository<Event>>;
   let userRepository: jest.Mocked<Repository<User>>;
   let notificationService: jest.Mocked<NotificationService>;
+  const mockEventQueryBuilder = {
+    leftJoinAndSelect: jest.fn().mockReturnThis(),
+    where: jest.fn().mockReturnThis(),
+    andWhere: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    addOrderBy: jest.fn().mockReturnThis(),
+    skip: jest.fn().mockReturnThis(),
+    take: jest.fn().mockReturnThis(),
+    getMany: jest.fn(),
+    getManyAndCount: jest.fn(),
+  };
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -25,7 +36,9 @@ describe("EventService", () => {
             save: jest.fn(),
             update: jest.fn(),
             create: jest.fn(),
-            createQueryBuilder: jest.fn(),
+            createQueryBuilder: jest
+              .fn()
+              .mockReturnValue(mockEventQueryBuilder),
           },
         },
         {
@@ -47,6 +60,21 @@ describe("EventService", () => {
     eventRepository = module.get(getRepositoryToken(Event));
     userRepository = module.get(getRepositoryToken(User));
     notificationService = module.get(NotificationService);
+
+    Object.values(mockEventQueryBuilder).forEach((value) => {
+      if (typeof value === "function" && "mockClear" in value) {
+        value.mockClear();
+      }
+    });
+    mockEventQueryBuilder.leftJoinAndSelect.mockReturnThis();
+    mockEventQueryBuilder.where.mockReturnThis();
+    mockEventQueryBuilder.andWhere.mockReturnThis();
+    mockEventQueryBuilder.orderBy.mockReturnThis();
+    mockEventQueryBuilder.addOrderBy.mockReturnThis();
+    mockEventQueryBuilder.skip.mockReturnThis();
+    mockEventQueryBuilder.take.mockReturnThis();
+    mockEventQueryBuilder.getMany.mockResolvedValue([]);
+    mockEventQueryBuilder.getManyAndCount.mockResolvedValue([[], 0]);
     eventRepository.save.mockImplementation(async (value) => value as Event);
     notificationService.create.mockResolvedValue({} as any);
   });
@@ -137,6 +165,19 @@ describe("EventService", () => {
         id: "event-3",
         reminderSent: false,
       }),
+    );
+  });
+
+  it("excludes archived events from calendar feed", async () => {
+    await service.getCalendarEvents(
+      "tenant-1",
+      new Date("2026-03-01T00:00:00.000Z"),
+      new Date("2026-03-31T23:59:59.999Z"),
+    );
+
+    expect(mockEventQueryBuilder.andWhere).toHaveBeenCalledWith(
+      "event.status != :archivedStatus",
+      { archivedStatus: "archived" },
     );
   });
 });

@@ -1,0 +1,643 @@
+.platform-admin-shell {
+  --platform-admin-ink: #1e1d19;
+  --platform-admin-muted: #645f55;
+  --platform-admin-line: rgba(31, 29, 25, 0.12);
+  --platform-admin-accent: #9d5a2f;
+  --platform-admin-accent-soft: rgba(157, 90, 47, 0.12);
+  --platform-admin-surface: rgba(255, 252, 247, 0.94);
+  --platform-admin-surface-strong: #ffffff;
+  --platform-admin-shadow: 0 28px 60px rgba(48, 35, 20, 0.08);
+  min-height: 100vh;
+  padding: 2rem;
+  background:
+    radial-gradient(circle at top left, rgba(214, 180, 140, 0.28), transparent 34%),
+    linear-gradient(180deg, #f8f1e7 0%, #efe4d6 100%);
+  color: var(--platform-admin-ink);
+}
+
+.platform-admin-hero,
+.platform-admin-panel,
+.platform-admin-card {
+  border: 1px solid var(--platform-admin-line);
+  border-radius: 24px;
+  background: var(--platform-admin-surface);
+  box-shadow: var(--platform-admin-shadow);
+  backdrop-filter: blur(10px);
+}
+
+.platform-admin-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
+  gap: 1.5rem;
+  padding: 2rem;
+  margin: 0 auto 1.5rem;
+  max-width: 1320px;
+}
+
+.platform-admin-hero h1,
+.platform-admin-panel h2,
+.platform-admin-card h3 {
+  margin: 0;
+  font-family: "Georgia", "Times New Roman", serif;
+}
+
+.platform-admin-hero h1 {
+  font-size: clamp(2rem, 4vw, 3.35rem);
+  line-height: 0.98;
+  max-width: 12ch;
+}
+
+.platform-admin-eyebrow,
+.platform-admin-status,
+.platform-admin-card-route {
+  display: inline-flex;
+  align-items: center;
+  width: fit-content;
+  border-radius: 999px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.platform-admin-eyebrow,
+.platform-admin-status--locked_for_mvp,
+.platform-admin-card-route {
+  background: var(--platform-admin-accent-soft);
+  color: var(--platform-admin-accent);
+}
+
+.platform-admin-eyebrow {
+  margin-bottom: 1rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.platform-admin-hero p,
+.platform-admin-card p,
+.platform-admin-panel p,
+.platform-admin-panel li,
+.platform-admin-card li,
+.platform-admin-highlight small,
+.platform-admin-card small {
+  color: var(--platform-admin-muted);
+  line-height: 1.55;
+}
+
+.platform-admin-highlight {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 1.25rem;
+  border-radius: 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.84) 0%,
+    rgba(255, 247, 240, 0.92) 100%
+  );
+  border: 1px solid rgba(157, 90, 47, 0.18);
+}
+
+.platform-admin-highlight span {
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--platform-admin-muted);
+}
+
+.platform-admin-highlight strong {
+  font-size: 1.3rem;
+}
+
+.platform-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1.5rem;
+  max-width: 1320px;
+  margin: 0 auto 1.5rem;
+}
+
+.platform-admin-panel {
+  max-width: 1320px;
+  margin: 0 auto 1.5rem;
+  padding: 1.6rem;
+}
+
+.platform-admin-panel--auth {
+  position: relative;
+  overflow: hidden;
+}
+
+.platform-admin-panel ul,
+.platform-admin-panel ol,
+.platform-admin-card ul {
+  margin: 1rem 0 0;
+  padding-left: 1.1rem;
+}
+
+.platform-admin-section-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: end;
+  margin-bottom: 1rem;
+}
+
+.platform-admin-section-header p {
+  max-width: 38rem;
+  margin: 0;
+}
+
+.platform-admin-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.platform-admin-card {
+  padding: 1.25rem;
+}
+
+.platform-admin-card-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.65rem;
+}
+
+.platform-admin-card-route,
+.platform-admin-status {
+  padding: 0.35rem 0.65rem;
+}
+
+.platform-admin-status--phase_2 {
+  background: rgba(45, 92, 126, 0.12);
+  color: #2d5c7e;
+}
+
+.platform-admin-api-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.platform-admin-api-row {
+  display: grid;
+  grid-template-columns: 5rem minmax(0, 1fr);
+  gap: 1rem;
+  padding: 0.95rem 0;
+  border-top: 1px solid var(--platform-admin-line);
+}
+
+.platform-admin-api-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.platform-admin-api-row code {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: fit-content;
+  padding: 0.35rem 0.55rem;
+  border-radius: 999px;
+  background: rgba(31, 29, 25, 0.06);
+  font-size: 0.8rem;
+  font-weight: 700;
+}
+
+.platform-admin-api-row strong {
+  display: block;
+  margin-bottom: 0.3rem;
+}
+
+.platform-admin-api-row p {
+  margin: 0;
+}
+
+.platform-admin-next-steps {
+  margin-top: 0;
+}
+
+.platform-admin-form {
+  display: grid;
+  gap: 1rem;
+}
+
+.platform-admin-form-grid,
+.platform-admin-auth-grid,
+.platform-admin-mfa-layout,
+.platform-admin-backup-grid,
+.platform-admin-inline-stats,
+.platform-admin-metric-grid,
+.platform-admin-registry-layout,
+.platform-admin-detail-grid,
+.platform-admin-registry-filters {
+  display: grid;
+  gap: 1rem;
+}
+
+.platform-admin-form-grid,
+.platform-admin-inline-stats,
+.platform-admin-detail-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.platform-admin-auth-grid,
+.platform-admin-mfa-layout {
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+}
+
+.platform-admin-metric-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-top: 1rem;
+}
+
+.platform-admin-registry-layout {
+  grid-template-columns: minmax(320px, 0.95fr) minmax(0, 1.05fr);
+  align-items: start;
+  margin-top: 1.25rem;
+}
+
+.platform-admin-registry-filters {
+  grid-template-columns: minmax(0, 2fr) repeat(3, minmax(0, 1fr));
+}
+
+.platform-admin-field {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.platform-admin-field span,
+.platform-admin-identity-card span,
+.platform-admin-inline-stats span,
+.platform-admin-manual-secret span,
+.platform-admin-mfa-card > span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--platform-admin-muted);
+}
+
+.platform-admin-field input {
+  width: 100%;
+  border: 1px solid rgba(31, 29, 25, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--platform-admin-ink);
+  padding: 0.95rem 1rem;
+  font: inherit;
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    transform 160ms ease;
+}
+
+.platform-admin-field select {
+  width: 100%;
+  border: 1px solid rgba(31, 29, 25, 0.12);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.85);
+  color: var(--platform-admin-ink);
+  padding: 0.95rem 1rem;
+  font: inherit;
+}
+
+.platform-admin-field input:focus {
+  outline: none;
+  border-color: rgba(157, 90, 47, 0.5);
+  box-shadow: 0 0 0 4px rgba(157, 90, 47, 0.12);
+  transform: translateY(-1px);
+}
+
+.platform-admin-field select:focus {
+  outline: none;
+  border-color: rgba(157, 90, 47, 0.5);
+  box-shadow: 0 0 0 4px rgba(157, 90, 47, 0.12);
+}
+
+.platform-admin-button {
+  width: fit-content;
+  min-width: 12rem;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(135deg, #8c4f29 0%, #c67237 100%);
+  color: #fff;
+  padding: 0.85rem 1.25rem;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 16px 32px rgba(130, 72, 34, 0.2);
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    opacity 160ms ease;
+}
+
+.platform-admin-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 18px 36px rgba(130, 72, 34, 0.25);
+}
+
+.platform-admin-button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+
+.platform-admin-button--ghost {
+  border: 1px solid rgba(31, 29, 25, 0.12);
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--platform-admin-ink);
+  box-shadow: none;
+}
+
+.platform-admin-notice,
+.platform-admin-inline-note,
+.platform-admin-empty-state,
+.platform-admin-identity-card,
+.platform-admin-mfa-card,
+.platform-admin-inline-stats > div,
+.platform-admin-metric-card,
+.platform-admin-alert,
+.platform-admin-registry-item,
+.platform-admin-detail-card,
+.platform-admin-user-row {
+  border: 1px solid rgba(31, 29, 25, 0.1);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.7);
+}
+
+.platform-admin-notice {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+}
+
+.platform-admin-notice--error {
+  border-color: rgba(164, 52, 52, 0.2);
+  background: rgba(190, 73, 73, 0.08);
+  color: #7f2929;
+}
+
+.platform-admin-notice--success {
+  border-color: rgba(41, 112, 72, 0.2);
+  background: rgba(55, 145, 88, 0.08);
+  color: #24593a;
+}
+
+.platform-admin-notice--neutral {
+  border-color: rgba(45, 92, 126, 0.18);
+  background: rgba(45, 92, 126, 0.08);
+  color: #2d5c7e;
+}
+
+.platform-admin-inline-note,
+.platform-admin-empty-state {
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+}
+
+.platform-admin-empty-state strong {
+  display: block;
+  margin-bottom: 0.45rem;
+}
+
+.platform-admin-auth-stack {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+}
+
+.platform-admin-identity-card,
+.platform-admin-mfa-card {
+  display: grid;
+  gap: 0.5rem;
+  padding: 1rem 1.1rem;
+}
+
+.platform-admin-identity-card strong,
+.platform-admin-inline-stats strong {
+  font-size: 1.05rem;
+}
+
+.platform-admin-inline-stats > div {
+  padding: 0.9rem 1rem;
+}
+
+.platform-admin-metric-card,
+.platform-admin-detail-card,
+.platform-admin-user-row,
+.platform-admin-alert,
+.platform-admin-registry-item {
+  padding: 1rem 1.1rem;
+}
+
+.platform-admin-metric-card strong,
+.platform-admin-detail-grid strong,
+.platform-admin-registry-item strong {
+  display: block;
+  font-size: 1.2rem;
+  margin-top: 0.3rem;
+}
+
+.platform-admin-metric-card span,
+.platform-admin-detail-grid span,
+.platform-admin-registry-meta span,
+.platform-admin-alert-header span,
+.platform-admin-user-row span {
+  color: var(--platform-admin-muted);
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.platform-admin-alert-list,
+.platform-admin-registry-list,
+.platform-admin-user-table {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.platform-admin-alert-header,
+.platform-admin-registry-item-header,
+.platform-admin-registry-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: baseline;
+}
+
+.platform-admin-alert--critical {
+  border-color: rgba(153, 35, 35, 0.25);
+  background: rgba(180, 51, 51, 0.09);
+}
+
+.platform-admin-alert--high {
+  border-color: rgba(184, 98, 30, 0.22);
+  background: rgba(184, 98, 30, 0.08);
+}
+
+.platform-admin-alert--medium {
+  border-color: rgba(45, 92, 126, 0.18);
+  background: rgba(45, 92, 126, 0.08);
+}
+
+.platform-admin-registry-item {
+  display: grid;
+  gap: 0.75rem;
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    transform 160ms ease,
+    border-color 160ms ease,
+    background 160ms ease;
+}
+
+.platform-admin-registry-item:hover {
+  transform: translateY(-1px);
+  border-color: rgba(157, 90, 47, 0.24);
+}
+
+.platform-admin-registry-item--active {
+  border-color: rgba(157, 90, 47, 0.4);
+  background: rgba(255, 247, 240, 0.92);
+}
+
+.platform-admin-risk-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.platform-admin-risk-list span {
+  display: inline-flex;
+  border-radius: 999px;
+  background: rgba(31, 29, 25, 0.07);
+  padding: 0.3rem 0.55rem;
+  font-size: 0.78rem;
+  color: var(--platform-admin-muted);
+}
+
+.platform-admin-panel--nested {
+  margin-top: 1rem;
+  margin-bottom: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.platform-admin-user-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 0.7fr) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: center;
+}
+
+.platform-admin-qr {
+  width: min(100%, 240px);
+  aspect-ratio: 1 / 1;
+  align-self: center;
+  justify-self: center;
+  border-radius: 20px;
+  background: #fff;
+  padding: 0.6rem;
+}
+
+.platform-admin-manual-secret code,
+.platform-admin-backup-grid code {
+  display: inline-flex;
+  width: fit-content;
+  border-radius: 999px;
+  background: rgba(31, 29, 25, 0.07);
+  padding: 0.4rem 0.65rem;
+  font-size: 0.88rem;
+}
+
+.platform-admin-backup-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.platform-admin-loading-line {
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(31, 29, 25, 0.08);
+}
+
+.platform-admin-loading-line::after {
+  content: "";
+  display: block;
+  width: 28%;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(135deg, #8c4f29 0%, #c67237 100%);
+  animation: platform-admin-loading 1.4s ease-in-out infinite;
+}
+
+@keyframes platform-admin-loading {
+  0% {
+    transform: translateX(-10%);
+  }
+
+  50% {
+    transform: translateX(220%);
+  }
+
+  100% {
+    transform: translateX(-10%);
+  }
+}
+
+@media (max-width: 980px) {
+  .platform-admin-shell {
+    padding: 1.25rem;
+  }
+
+  .platform-admin-hero,
+  .platform-admin-grid,
+  .platform-admin-card-grid,
+  .platform-admin-auth-grid,
+  .platform-admin-mfa-layout,
+  .platform-admin-form-grid,
+  .platform-admin-inline-stats,
+  .platform-admin-backup-grid,
+  .platform-admin-metric-grid,
+  .platform-admin-registry-layout,
+  .platform-admin-detail-grid,
+  .platform-admin-registry-filters,
+  .platform-admin-user-row {
+    grid-template-columns: 1fr;
+  }
+
+  .platform-admin-section-header {
+    align-items: start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .platform-admin-shell {
+    padding: 0.9rem;
+  }
+
+  .platform-admin-hero,
+  .platform-admin-panel,
+  .platform-admin-card {
+    border-radius: 20px;
+  }
+
+  .platform-admin-hero,
+  .platform-admin-panel {
+    padding: 1.1rem;
+  }
+
+  .platform-admin-button {
+    width: 100%;
+  }
+
+  .platform-admin-api-row {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+}

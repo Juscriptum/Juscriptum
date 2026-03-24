@@ -126,8 +126,10 @@
 .mobile-scan-card-actions button {
   border: 1px solid #d5dde7;
   border-radius: 0.85rem;
+  min-height: 2.75rem;
   padding: 0.7rem;
   background: #fff;
+  font-weight: 600;
 }
 
 .mobile-scan-empty,
@@ -136,7 +138,33 @@
 }
 
 @media (max-width: 640px) {
+  .mobile-scan-page {
+    padding: 0.85rem;
+  }
+
   .mobile-scan-upload-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mobile-scan-card-meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .mobile-scan-footer .btn {
+    width: 100%;
+  }
+}
+
+@media (max-width: 480px) {
+  .mobile-scan-header,
+  .mobile-scan-panel,
+  .mobile-scan-pages,
+  .mobile-scan-footer {
+    padding: 0.85rem;
+  }
+
+  .mobile-scan-card-actions {
     grid-template-columns: 1fr;
   }
 }

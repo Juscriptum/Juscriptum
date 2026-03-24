@@ -1,11 +1,16 @@
 import api from "./api";
-import { CreateEventDto, Event } from "../types/event.types";
+import {
+  CalendarEventStatus,
+  CreateEventDto,
+  Event,
+} from "../types/event.types";
 
 class EventService {
   private baseUrl = "/events";
 
   async getEvents(filters?: {
     caseId?: string;
+    status?: CalendarEventStatus;
     page?: number;
     limit?: number;
     sortBy?: string;
@@ -27,7 +32,10 @@ class EventService {
     }>(`${this.baseUrl}${params.toString() ? `?${params.toString()}` : ""}`);
   }
 
-  async getAllEvents(filters?: { caseId?: string }): Promise<Event[]> {
+  async getAllEvents(filters?: {
+    caseId?: string;
+    status?: CalendarEventStatus;
+  }): Promise<Event[]> {
     const events: Event[] = [];
     let page = 1;
     let total = 0;

@@ -80,6 +80,28 @@
     position: relative;
 }
 
+.calendar-archive-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    min-height: var(--control-height-lg);
+    padding: 0.45rem 0.85rem;
+    border: 1px solid rgba(20, 32, 51, 0.1);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.88);
+    color: var(--color-ink-700);
+    font-size: var(--text-sm);
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+}
+
+.calendar-archive-toggle input {
+    width: 1rem;
+    height: 1rem;
+    accent-color: var(--color-accent-600);
+}
+
 .search-input {
     min-height: var(--control-height-lg);
     padding: 0.5rem 4rem 0.5rem 0.75rem;
@@ -190,6 +212,14 @@
 .event-card:hover {
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.event-card--target {
+    border-color: rgba(198, 143, 38, 0.45);
+    border-left-color: #c68f26;
+    background:
+        linear-gradient(180deg, rgba(255, 251, 239, 0.96), rgba(255, 246, 223, 0.92));
+    box-shadow: 0 0 0 3px rgba(198, 143, 38, 0.18), 0 12px 22px rgba(20, 32, 51, 0.08);
 }
 
 .event-time {
@@ -505,6 +535,7 @@
     justify-content: center;
     z-index: 1000;
     padding: 20px;
+    overflow-y: auto;
 }
 
 .modal-overlay.active {
@@ -513,10 +544,13 @@
 
 .modal {
     width: min(720px, 100%);
+    max-height: calc(100vh - 40px);
     background: #fff;
     border-radius: 12px;
     overflow: hidden;
     box-shadow: 0 12px 40px rgba(0, 0, 0, 0.25);
+    display: flex;
+    flex-direction: column;
 }
 
 .modal-header {
@@ -544,6 +578,9 @@
 
 .modal-content {
     padding: 24px;
+    overflow-y: auto;
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .event-detail {
@@ -574,6 +611,16 @@
     justify-content: flex-end;
     gap: 10px;
     margin-top: 24px;
+}
+
+.calendar-compact-hint {
+    margin-bottom: 1rem;
+    padding: 0.9rem 1rem;
+    border: 1px solid rgba(20, 32, 51, 0.08);
+    border-radius: 1rem;
+    background: rgba(243, 247, 252, 0.9);
+    color: var(--color-ink-700);
+    line-height: 1.5;
 }
 
 @media (max-width: 1200px) {

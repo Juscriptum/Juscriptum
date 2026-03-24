@@ -2,6 +2,7 @@ import {
   Injectable,
   BadRequestException,
   InternalServerErrorException,
+  Logger,
 } from "@nestjs/common";
 import { ModuleRef } from "@nestjs/core";
 import { ConfigService } from "@nestjs/config";
@@ -25,7 +26,8 @@ import {
  */
 @Injectable()
 export class StripeService {
-  private stripe: Stripe;
+  private readonly logger = new Logger(StripeService.name);
+  private stripe: Stripe | null = null;
 
   constructor(
     private readonly configService: ConfigService,
@@ -35,12 +37,23 @@ export class StripeService {
     const secretKey = this.configService.get<string>("STRIPE_SECRET_KEY");
 
     if (!secretKey) {
-      throw new Error("STRIPE_SECRET_KEY is not configured");
+      this.logger.warn(
+        "Stripe is not configured - billing functionality will be limited",
+      );
+      return;
     }
 
     this.stripe = new Stripe(secretKey, {
       apiVersion: "2023-08-16",
     });
+  }
+
+  private getStripe(): Stripe {
+    if (!this.stripe) {
+      throw new BadRequestException("Stripe is not configured");
+    }
+
+    return this.stripe;
   }
 
   private getBillingSyncPort(): BillingSyncPort {
@@ -63,7 +76,7 @@ export class StripeService {
 
     if (!customerId) {
       // Create customer
-      const customer = await this.stripe.customers.create({
+      const customer = await this.getStripe().customers.create({
         metadata: { tenantId },
       });
 
@@ -71,7 +84,7 @@ export class StripeService {
     }
 
     // Create checkout session
-    const session = await this.stripe.checkout.sessions.create({
+    const session = await this.getStripe().checkout.sessions.create({
       customer: customerId,
       payment_method_types: ["card"],
       line_items: prices.map((price: Stripe.Price) => ({
@@ -122,7 +135,7 @@ export class StripeService {
       throw new BadRequestException("Customer not found");
     }
 
-    const session = await this.stripe.billingPortal.sessions.create({
+    const session = await this.getStripe().billingPortal.sessions.create({
       customer: customerId,
       return_url: returnUrl,
     });
@@ -137,7 +150,7 @@ export class StripeService {
     subscriptionId: string,
     atPeriodEnd: boolean = true,
   ): Promise<Stripe.Subscription> {
-    return this.stripe.subscriptions.update(subscriptionId, {
+    return this.getStripe().subscriptions.update(subscriptionId, {
       cancel_at_period_end: atPeriodEnd,
     });
   }
@@ -148,7 +161,7 @@ export class StripeService {
   async resumeSubscription(
     subscriptionId: string,
   ): Promise<Stripe.Subscription> {
-    return this.stripe.subscriptions.update(subscriptionId, {
+    return this.getStripe().subscriptions.update(subscriptionId, {
       cancel_at_period_end: false,
     });
   }
@@ -162,10 +175,10 @@ export class StripeService {
   ): Promise<Stripe.Subscription> {
     const price = await this.getPlanPrice(plan);
 
-    return this.stripe.subscriptions.update(subscriptionId, {
+    return this.getStripe().subscriptions.update(subscriptionId, {
       items: [
         {
-          id: (await this.stripe.subscriptions.retrieve(subscriptionId)).items
+          id: (await this.getStripe().subscriptions.retrieve(subscriptionId)).items
             .data[0].id,
           price: price.id,
         },
@@ -182,7 +195,7 @@ export class StripeService {
       return [];
     }
 
-    const invoices = await this.stripe.invoices.list({
+    const invoices = await this.getStripe().invoices.list({
       ...(customerId ? { customer: customerId } : {}),
       ...(subscriptionId ? { subscription: subscriptionId } : {}),
       limit: 20,
@@ -209,11 +222,11 @@ export class StripeService {
     }
 
     const [paymentMethods, customer] = await Promise.all([
-      this.stripe.paymentMethods.list({
+      this.getStripe().paymentMethods.list({
         customer: customerId,
         type: "card",
       }),
-      this.stripe.customers.retrieve(customerId),
+      this.getStripe().customers.retrieve(customerId),
     ]);
 
     const defaultPaymentMethodId =
@@ -253,7 +266,7 @@ export class StripeService {
     let event: Stripe.Event;
 
     try {
-      event = this.stripe.webhooks.constructEvent(
+      event = this.getStripe().webhooks.constructEvent(
         payload,
         signature,
         webhookSecret,
@@ -475,7 +488,7 @@ export class StripeService {
    * Get customer ID for tenant
    */
   private async getCustomerId(tenantId: string): Promise<string | null> {
-    const customers = await this.stripe.customers.list({
+    const customers = await this.getStripe().customers.list({
       email: undefined,
       limit: 1,
     });
@@ -508,7 +521,7 @@ export class StripeService {
       );
     }
 
-    return this.stripe.prices.retrieve(priceId);
+    return this.getStripe().prices.retrieve(priceId);
   }
 
   /**

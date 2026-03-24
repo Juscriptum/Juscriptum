@@ -1,0 +1,17 @@
+.contact-text__link {
+  color: var(--color-accent-700);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.16em;
+  transition: color 0.18s ease;
+}
+
+.contact-text__link:hover {
+  color: var(--color-accent-600);
+}
+
+.contact-text__link:focus-visible {
+  outline: 2px solid rgba(61, 118, 209, 0.28);
+  outline-offset: 2px;
+  border-radius: 0.2rem;
+}

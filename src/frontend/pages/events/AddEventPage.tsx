@@ -2,14 +2,16 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { Alert } from "../../components/Alert";
 import { PageHeader } from "../../components/PageHeader";
+import { RegistryHearingPreviewModal } from "../../components/RegistryHearingPreviewModal";
 import { Spinner } from "../../components/Spinner";
 import { Breadcrumbs } from "../../components/navigation";
 import { useAuth } from "../../hooks/useAuth";
 import { caseService } from "../../services/case.service";
 import { clientService } from "../../services/client.service";
 import { eventService } from "../../services/event.service";
+import { formatCaseReferenceLabel } from "../../utils/caseFormat";
 import { User as AuthUser } from "../../types/auth.types";
-import { Case } from "../../types/case.types";
+import { Case, CaseRegistrySearchResult } from "../../types/case.types";
 import { Client } from "../../types/client.types";
 import {
   CalendarEventType,
@@ -51,6 +53,23 @@ const toTodayIso = () => new Date().toISOString().split("T")[0];
 
 type EventAudienceType = "user" | "client";
 
+interface RegistryEventPreview {
+  caseId?: string;
+  title: string;
+  description?: string;
+  eventDate: string;
+  eventTime?: string;
+  endDate?: string;
+  location?: string;
+  courtRoom?: string;
+  judgeName?: string;
+  responsibleContact?: string;
+  caseNumber: string;
+  caseDescription?: string;
+  participants?: string;
+  sourceHint?: string;
+}
+
 const getClientDisplayName = (client: Client) => {
   const fullName = [client.lastName, client.firstName, client.patronymic]
     .filter(Boolean)
@@ -88,6 +107,14 @@ export const AddEventPage: React.FC = () => {
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [registryLookupLoading, setRegistryLookupLoading] = useState(false);
+  const [registryLookupError, setRegistryLookupError] = useState<string | null>(
+    null,
+  );
+  const [registryPreview, setRegistryPreview] =
+    useState<RegistryEventPreview | null>(null);
+  const [registryPreviewOpen, setRegistryPreviewOpen] = useState(false);
+  const [registryCreateLoading, setRegistryCreateLoading] = useState(false);
   const [clients, setClients] = useState<Client[]>([]);
   const [cases, setCases] = useState<Case[]>([]);
   const [selectedClientId, setSelectedClientId] = useState(clientId);
@@ -198,12 +225,175 @@ export const AddEventPage: React.FC = () => {
     () => clients.find((client) => client.id === selectedClientId) || null,
     [clients, selectedClientId],
   );
+  const selectedCase = useMemo(
+    () => cases.find((item) => item.id === form.caseId) || null,
+    [cases, form.caseId],
+  );
 
   const updateForm = <K extends keyof CreateEventDto>(
     key: K,
     value: CreateEventDto[K],
   ) => {
     setForm((current) => ({ ...current, [key]: value }));
+  };
+
+  const buildRegistryPreview = (
+    result: CaseRegistrySearchResult,
+  ): RegistryEventPreview => {
+    const [eventDate, eventTime] = parseRegistryDateTime(result.stageDate);
+    const matchedCase = cases.find(
+      (item) => item.registryCaseNumber?.trim() === result.caseNumber.trim(),
+    );
+
+    return {
+      caseId: matchedCase?.id || form.caseId,
+      title: result.caseDescription
+        ? `Судове засідання: ${result.caseDescription}`
+        : `Судове засідання у справі ${result.caseNumber}`,
+      description: [
+        "Дані підтягнуто з реєстру.",
+        `№ справи: ${result.caseNumber}`,
+        `Учасники: ${result.participants || "не вказано"}`,
+      ]
+        .filter(Boolean)
+        .join("\n"),
+      eventDate: eventDate || form.eventDate,
+      eventTime: eventTime || form.eventTime || undefined,
+      endDate: eventDate || form.endDate,
+      location: result.courtName || form.location || undefined,
+      courtRoom:
+        (result as CaseRegistrySearchResult & { courtRoom?: string })
+          .courtRoom ||
+        form.courtRoom ||
+        undefined,
+      judgeName: result.judge || form.judgeName || undefined,
+      responsibleContact: result.judge || form.responsibleContact || undefined,
+      caseNumber: result.caseNumber,
+      caseDescription: result.caseDescription || undefined,
+      participants: result.participants || undefined,
+      sourceHint: matchedCase
+        ? `Знайдено відповідну справу в системі: ${matchedCase.caseNumber}.`
+        : "Можна створити подію одразу з даних реєстру.",
+    };
+  };
+
+  const handleRegistryEventLookup = async () => {
+    if (audienceType !== "client") {
+      setRegistryLookupError(
+        "Пошук події в реєстрі доступний для подій, прив'язаних до клієнта або справи.",
+      );
+      return;
+    }
+
+    if (!selectedCase?.id) {
+      setRegistryLookupError(
+        "Для пошуку найближчого засідання з реєстру спочатку оберіть справу.",
+      );
+      return;
+    }
+
+    try {
+      setRegistryLookupLoading(true);
+      setRegistryLookupError(null);
+      setRegistryPreview(null);
+      setRegistryPreviewOpen(false);
+      setError(null);
+
+      const suggestion = await caseService.getRegistryHearingSuggestion(
+        selectedCase.id,
+      );
+
+      if (!suggestion) {
+        setRegistryLookupError(
+          "Найближче засідання у реєстрі для обраної справи не знайдено.",
+        );
+        return;
+      }
+
+      setRegistryPreview(
+        buildRegistryPreview({
+          source: "court_dates",
+          sourceLabel: "Дати судових засідань",
+          person: selectedClient
+            ? getClientDisplayName(selectedClient)
+            : suggestion.caseInvolved,
+          role: "",
+          caseDescription: suggestion.caseDescription,
+          caseNumber: suggestion.registryCaseNumber || suggestion.caseNumber,
+          courtName: suggestion.courtName,
+          caseProc: "",
+          registrationDate: suggestion.date,
+          judge: suggestion.judges,
+          type: "Судове засідання",
+          stageDate: suggestion.date,
+          stageName: "Найближче засідання",
+          participants: suggestion.caseInvolved,
+          courtRoom: suggestion.courtRoom,
+        }),
+      );
+      setRegistryPreviewOpen(true);
+    } catch (lookupError: any) {
+      setRegistryLookupError(
+        lookupError.response?.data?.message ||
+          lookupError.message ||
+          "Не вдалося знайти подію в реєстрі.",
+      );
+    } finally {
+      setRegistryLookupLoading(false);
+    }
+  };
+
+  const handleCreateEventFromRegistry = async () => {
+    if (!registryPreview) {
+      return;
+    }
+
+    try {
+      setRegistryCreateLoading(true);
+      setError(null);
+      setRegistryLookupError(null);
+      setSuccess(null);
+
+      await eventService.createEvent({
+        ...form,
+        caseId:
+          audienceType === "client"
+            ? registryPreview.caseId || form.caseId || undefined
+            : undefined,
+        type: "court_sitting",
+        title: registryPreview.title,
+        description: registryPreview.description,
+        eventDate: registryPreview.eventDate,
+        eventTime: registryPreview.eventTime,
+        endDate: registryPreview.endDate,
+        endTime: registryPreview.eventTime,
+        location: registryPreview.location,
+        courtRoom: registryPreview.courtRoom,
+        judgeName: registryPreview.judgeName,
+        responsibleContact: registryPreview.responsibleContact,
+        participants: buildParticipantsPayload(),
+        reminderValue: form.reminderValue,
+        reminderUnit: form.reminderUnit,
+        reminderDaysBefore:
+          form.reminderUnit === "days" ? form.reminderValue : 0,
+        isRecurring: false,
+        recurrencePattern: undefined,
+        recurrenceInterval: undefined,
+        recurrenceEndDate: undefined,
+      });
+
+      setRegistryPreviewOpen(false);
+      setSuccess("Подію створено з даних реєстру. Повертаю до календаря…");
+      window.setTimeout(() => navigate("/calendar"), 500);
+    } catch (createError: any) {
+      setError(
+        createError.response?.data?.message ||
+          createError.message ||
+          "Не вдалося створити подію з даних реєстру.",
+      );
+    } finally {
+      setRegistryCreateLoading(false);
+    }
   };
 
   const buildParticipantsPayload = (): Record<string, unknown> | undefined => {
@@ -336,6 +526,11 @@ export const AddEventPage: React.FC = () => {
           {success}
         </Alert>
       )}
+      {registryLookupError && (
+        <Alert type="info" onClose={() => setRegistryLookupError(null)}>
+          {registryLookupError}
+        </Alert>
+      )}
 
       <form className="add-event-form" onSubmit={handleSubmit}>
         <div className="add-event-grid">
@@ -388,25 +583,51 @@ export const AddEventPage: React.FC = () => {
           </label>
 
           {audienceType === "client" ? (
-            <label className="form-field form-field--wide">
-              <span>Клієнт</span>
-              <select
-                value={selectedClientId}
-                onChange={(event) => {
-                  const nextClientId = event.target.value;
-                  setSelectedClientId(nextClientId);
-                  updateForm("caseId", undefined);
-                }}
-                disabled={loading || optionsLoading}
-              >
-                <option value="">Оберіть клієнта</option>
-                {clients.map((client) => (
-                  <option key={client.id} value={client.id}>
-                    {getClientDisplayName(client)}
+            <>
+              <label className="form-field form-field--wide">
+                <span>Клієнт</span>
+                <select
+                  value={selectedClientId}
+                  onChange={(event) => {
+                    const nextClientId = event.target.value;
+                    setSelectedClientId(nextClientId);
+                    updateForm("caseId", undefined);
+                  }}
+                  disabled={loading || optionsLoading}
+                >
+                  <option value="">Оберіть клієнта</option>
+                  {clients.map((client) => (
+                    <option key={client.id} value={client.id}>
+                      {getClientDisplayName(client)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="form-field form-field--wide">
+                <span>Справа (необов'язково)</span>
+                <select
+                  value={form.caseId || ""}
+                  onChange={(event) =>
+                    updateForm("caseId", event.target.value || undefined)
+                  }
+                  disabled={loading || optionsLoading || !selectedClientId}
+                >
+                  <option value="">
+                    {!selectedClientId
+                      ? "Спочатку оберіть клієнта"
+                      : availableCases.length > 0
+                        ? "Оберіть справу"
+                        : "У клієнта ще немає справ"}
                   </option>
-                ))}
-              </select>
-            </label>
+                  {availableCases.map((item) => (
+                    <option key={item.id} value={item.id}>
+                      {formatCaseReferenceLabel(item)}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </>
           ) : (
             <div className="form-field form-field--wide">
               <span>Користувач</span>
@@ -414,6 +635,27 @@ export const AddEventPage: React.FC = () => {
                 <strong>{getUserDisplayName(user)}</strong>
                 <p>Подія буде створена без прив'язки до клієнта та справи.</p>
               </div>
+            </div>
+          )}
+
+          {audienceType === "client" && (
+            <div className="form-field form-field--wide">
+              <span>Подія з реєстру</span>
+              <button
+                type="button"
+                className="btn btn-outline add-event-registry-btn"
+                onClick={handleRegistryEventLookup}
+                disabled={
+                  loading ||
+                  optionsLoading ||
+                  registryLookupLoading ||
+                  !selectedCase
+                }
+              >
+                {registryLookupLoading
+                  ? "Пошук у реєстрі..."
+                  : "Знайти найближче засідання"}
+              </button>
             </div>
           )}
 
@@ -646,32 +888,6 @@ export const AddEventPage: React.FC = () => {
               disabled={loading}
             />
           </label>
-
-          {audienceType === "client" && (
-            <label className="form-field">
-              <span>Справа (необов'язково)</span>
-              <select
-                value={form.caseId || ""}
-                onChange={(event) =>
-                  updateForm("caseId", event.target.value || undefined)
-                }
-                disabled={loading || optionsLoading || !selectedClientId}
-              >
-                <option value="">
-                  {!selectedClientId
-                    ? "Спочатку оберіть клієнта"
-                    : availableCases.length > 0
-                      ? "Оберіть справу"
-                      : "У клієнта ще немає справ"}
-                </option>
-                {availableCases.map((item) => (
-                  <option key={item.id} value={item.id}>
-                    {item.caseNumber} {item.title ? `• ${item.title}` : ""}
-                  </option>
-                ))}
-              </select>
-            </label>
-          )}
         </div>
 
         <div className="add-event-actions">
@@ -694,8 +910,52 @@ export const AddEventPage: React.FC = () => {
           </button>
         </div>
       </form>
+
+      <RegistryHearingPreviewModal
+        isOpen={registryPreviewOpen && Boolean(registryPreview)}
+        title="Знайдено найближче засідання"
+        date={
+          registryPreview?.eventTime
+            ? `${registryPreview.eventDate} ${registryPreview.eventTime}`
+            : registryPreview?.eventDate || ""
+        }
+        courtName={registryPreview?.location || ""}
+        courtRoom={registryPreview?.courtRoom}
+        caseNumber={registryPreview?.caseNumber || ""}
+        caseDescription={registryPreview?.caseDescription}
+        participants={registryPreview?.participants}
+        judge={
+          registryPreview?.judgeName || registryPreview?.responsibleContact
+        }
+        sourceHint={registryPreview?.sourceHint}
+        confirmLabel="Додати подію"
+        confirmLoading={registryCreateLoading}
+        onConfirm={handleCreateEventFromRegistry}
+        onClose={() => {
+          if (!registryCreateLoading) {
+            setRegistryPreviewOpen(false);
+          }
+        }}
+      />
     </div>
   );
 };
 
 export default AddEventPage;
+
+const parseRegistryDateTime = (value?: string): [string, string] => {
+  if (!value) {
+    return ["", ""];
+  }
+
+  const match = value.match(
+    /^(\d{2})\.(\d{2})\.(\d{4})(?:\s+(\d{2}):(\d{2}))?$/,
+  );
+
+  if (!match) {
+    return ["", ""];
+  }
+
+  const [, day, month, year, hours = "10", minutes = "00"] = match;
+  return [`${year}-${month}-${day}`, `${hours}:${minutes}`];
+};

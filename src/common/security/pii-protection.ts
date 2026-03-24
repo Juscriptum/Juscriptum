@@ -126,6 +126,7 @@ export function createBlindIndex(
   value: string,
   purpose:
     | "user_email"
+    | "platform_admin_email"
     | "organization_email"
     | "client_email"
     | "client_phone"
@@ -139,13 +140,27 @@ export function createBlindIndex(
 
 export function computeEmailBlindIndex(
   value: string | null | undefined,
-  purpose: "user_email" | "organization_email" | "client_email",
+  purpose:
+    | "user_email"
+    | "platform_admin_email"
+    | "organization_email"
+    | "client_email",
 ): string | null {
   if (!value) {
     return null;
   }
 
   return createBlindIndex(normalizeEmail(value), purpose);
+}
+
+export function computePlatformAdminEmailBlindIndex(
+  value: string | null | undefined,
+): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return createBlindIndex(normalizeEmail(value), "platform_admin_email");
 }
 
 export function computePhoneBlindIndex(

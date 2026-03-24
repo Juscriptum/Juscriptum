@@ -122,6 +122,24 @@ Update additional docs when relevant:
 
 Do not preserve contradictions for the sake of history. Fix them or label them historical.
 
+## Live VPS Sync Rule
+
+- When the user has explicitly provided current-session VPS access and expects a live server-visible result, treat local repo changes and the corresponding VPS update as one completion target.
+- In that mode, do not stop at a local fix if the user asked for a server-facing outcome; finish the matching VPS sync/rebuild/restart/verification for the affected surface too.
+- Mirror the same logical change in both places during the same work session:
+  - local repo code/docs
+  - VPS working tree or deployment assets
+  - relevant container/service restart or rebuild
+  - a real live verification probe when feasible
+- Do not write plaintext passwords, tokens, or private keys into repository files, docs, commits, or generated artifacts.
+- It is acceptable for only machine-specific values to differ between local and VPS:
+  - secrets
+  - hostnames/IPs
+  - certificates
+  - caches
+  - logs
+  - runtime data
+
 ## Navigation Hints
 
 Key runtime entry points:

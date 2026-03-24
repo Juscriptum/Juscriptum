@@ -7,6 +7,7 @@ import { organizationService } from "../../services/organization.service";
 import {
   LegalForm,
   Organization,
+  RegistryImportStateSummary,
   UpdateOrganizationData,
 } from "../../types/organization.types";
 import { useAppDispatch } from "../../store";
@@ -23,10 +24,69 @@ const LEGAL_FORM_LABELS: Record<LegalForm, string> = {
   other: "Інша форма",
 };
 
+const REGISTRY_STATUS_LABELS: Record<string, string> = {
+  running: "Оновлюється",
+  success: "Готово",
+  failed: "Помилка",
+};
+
+const formatRegistryDateTime = (value?: string | null): string => {
+  if (!value) {
+    return "Ще немає";
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return "Некоректна дата";
+  }
+
+  return new Intl.DateTimeFormat("uk-UA", {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(parsed);
+};
+
+const formatRegistryRows = (value?: number | null): string => {
+  if (!value) {
+    return "0";
+  }
+
+  return new Intl.NumberFormat("uk-UA").format(value);
+};
+
+const getRegistryStatusBadge = (
+  registryImport: RegistryImportStateSummary,
+): { className: "success" | "warning" | "danger"; label: string } => {
+  if (registryImport.available) {
+    return { className: "success", label: "Пошук готовий" };
+  }
+
+  if (registryImport.lastStatus === "failed") {
+    return { className: "danger", label: REGISTRY_STATUS_LABELS.failed };
+  }
+
+  if (registryImport.lastStatus === "running") {
+    return { className: "warning", label: REGISTRY_STATUS_LABELS.running };
+  }
+
+  if (registryImport.lastStatus === "success") {
+    return { className: "warning", label: "Індекс без даних" };
+  }
+
+  return { className: "warning", label: "Ще не запускалось" };
+};
+
 export const SettingsPage: React.FC = () => {
   const permissions = usePermissions();
   const dispatch = useAppDispatch();
   const [organization, setOrganization] = useState<Organization | null>(null);
+  const [registryImports, setRegistryImports] = useState<
+    RegistryImportStateSummary[]
+  >([]);
+  const [registryImportsLoading, setRegistryImportsLoading] = useState(true);
+  const [registryImportsError, setRegistryImportsError] = useState<
+    string | null
+  >(null);
   const [formData, setFormData] = useState<UpdateOrganizationData>({
     name: "",
     legalForm: "sole_proprietor",
@@ -96,8 +156,34 @@ export const SettingsPage: React.FC = () => {
       }
     };
 
+    const loadRegistryImports = async () => {
+      if (!canManageSettings) {
+        setRegistryImports([]);
+        setRegistryImportsError(null);
+        setRegistryImportsLoading(false);
+        return;
+      }
+
+      try {
+        setRegistryImportsLoading(true);
+        setRegistryImportsError(null);
+        const nextRegistryImports =
+          await organizationService.getRegistryImports();
+        setRegistryImports(nextRegistryImports);
+      } catch (error: any) {
+        setRegistryImports([]);
+        setRegistryImportsError(
+          error?.response?.data?.message ||
+            "Не вдалося завантажити метадані реєстрів",
+        );
+      } finally {
+        setRegistryImportsLoading(false);
+      }
+    };
+
     void loadOrganization();
-  }, []);
+    void loadRegistryImports();
+  }, [canManageSettings]);
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -198,6 +284,135 @@ export const SettingsPage: React.FC = () => {
           <strong>{organization?.maxUsers ?? "n/a"}</strong>
           <small>Ліміт активних акаунтів за планом</small>
         </div>
+
+        <section className="workspace-panel full">
+          <div className="workspace-panel-header">
+            <div>
+              <h3>Стан реєстрів</h3>
+              <p>
+                Дата набору даних, останнє завантаження та готовність пошуку по
+                кожному джерелу.
+              </p>
+            </div>
+          </div>
+
+          {registryImportsLoading ? (
+            <div className="settings-inline-loading">
+              <Spinner size="medium" />
+            </div>
+          ) : registryImportsError ? (
+            <Alert type="warning">{registryImportsError}</Alert>
+          ) : registryImports.length === 0 ? (
+            <div className="workspace-empty">
+              Метадані реєстрів ще не зібрані.
+            </div>
+          ) : (
+            <div className="settings-registry-list">
+              {registryImports.map((registryImport) => {
+                const badge = getRegistryStatusBadge(registryImport);
+
+                return (
+                  <article
+                    key={registryImport.sourceCode}
+                    className="settings-registry-item"
+                  >
+                    <div className="settings-registry-header">
+                      <div>
+                        <strong>{registryImport.sourceLabel}</strong>
+                        <span>
+                          {registryImport.resourceName ||
+                            "Службові метадані джерела"}
+                        </span>
+                      </div>
+                      <span className={`workspace-badge ${badge.className}`}>
+                        {badge.label}
+                      </span>
+                    </div>
+
+                    <div className="settings-registry-meta">
+                      <div>
+                        <span>Дата набору</span>
+                        <strong>
+                          {formatRegistryDateTime(
+                            registryImport.remoteUpdatedAt,
+                          )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Останнє завантаження</span>
+                        <strong>
+                          {formatRegistryDateTime(
+                            registryImport.lastDownloadedAt,
+                          )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Остання індексація</span>
+                        <strong>
+                          {formatRegistryDateTime(registryImport.lastIndexedAt)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Останній успіх</span>
+                        <strong>
+                          {formatRegistryDateTime(registryImport.lastSuccessAt)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Рядків в індексі</span>
+                        <strong>
+                          {formatRegistryRows(registryImport.rowsImported)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Статус</span>
+                        <strong>
+                          {registryImport.lastStatus
+                            ? REGISTRY_STATUS_LABELS[
+                                registryImport.lastStatus
+                              ] || registryImport.lastStatus
+                            : "Ще не запускалось"}
+                        </strong>
+                      </div>
+                    </div>
+
+                    {(registryImport.datasetUrl || registryImport.resourceUrl) && (
+                      <div className="settings-registry-links">
+                        {registryImport.datasetUrl && (
+                          <a
+                            href={registryImport.datasetUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="settings-registry-link"
+                          >
+                            Набір даних
+                          </a>
+                        )}
+                        {registryImport.resourceUrl && (
+                          <a
+                            href={registryImport.resourceUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="settings-registry-link"
+                          >
+                            Ресурс
+                          </a>
+                        )}
+                      </div>
+                    )}
+
+                    {registryImport.lastError &&
+                      registryImport.lastStatus === "failed" && (
+                        <div className="settings-registry-error">
+                          {registryImport.lastError}
+                        </div>
+                      )}
+                  </article>
+                );
+              })}
+            </div>
+          )}
+        </section>
 
         <section className="workspace-panel full">
           <form className="settings-form" onSubmit={handleSubmit}>

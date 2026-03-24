@@ -13,6 +13,8 @@ export type RegistryImportSourceCode = "court_stan" | "asvp" | "court_dates";
 interface SourceConfig {
   delimiter: string;
   originalEncoding: PreparedFileEncoding;
+  preSplitEnabledEnv?: string;
+  preSplitEnabledDefault?: boolean;
   splitMinBytesEnv: string;
   splitMinBytesDefault: number;
   splitRowsEnv: string;
@@ -43,7 +45,7 @@ const COURT_STAN_HEADERS = [
   "description",
 ];
 
-const ASVP_HEADERS = [
+export const ASVP_HEADERS = [
   "DEBTOR_NAME",
   "DEBTOR_BIRTHDATE",
   "DEBTOR_CODE",
@@ -73,6 +75,7 @@ const SOURCE_CONFIGS: Record<RegistryImportSourceCode, SourceConfig> = {
   court_stan: {
     delimiter: "\t",
     originalEncoding: "utf-8",
+    preSplitEnabledDefault: true,
     splitMinBytesEnv: "COURT_STAN_PRE_SPLIT_MIN_BYTES",
     splitMinBytesDefault: 64 * 1024 * 1024,
     splitRowsEnv: "COURT_STAN_SPLIT_ROWS_PER_FILE",
@@ -85,6 +88,8 @@ const SOURCE_CONFIGS: Record<RegistryImportSourceCode, SourceConfig> = {
   asvp: {
     delimiter: ",",
     originalEncoding: "asvp-repaired",
+    preSplitEnabledEnv: "ASVP_PRE_SPLIT_ENABLED",
+    preSplitEnabledDefault: false,
     splitMinBytesEnv: "ASVP_PRE_SPLIT_MIN_BYTES",
     splitMinBytesDefault: 256 * 1024 * 1024,
     splitRowsEnv: "ASVP_SPLIT_ROWS_PER_FILE",
@@ -96,6 +101,7 @@ const SOURCE_CONFIGS: Record<RegistryImportSourceCode, SourceConfig> = {
   court_dates: {
     delimiter: "\t",
     originalEncoding: "utf-8",
+    preSplitEnabledDefault: true,
     splitMinBytesEnv: "COURT_DATES_PRE_SPLIT_MIN_BYTES",
     splitMinBytesDefault: 64 * 1024 * 1024,
     splitRowsEnv: "COURT_DATES_SPLIT_ROWS_PER_FILE",
@@ -143,10 +149,10 @@ export async function prepareSourceImportPlan(
     const sourceFileName = path.basename(filePath);
     const fileSize = (await stat(filePath)).size;
 
-    if (fileSize <= splitMinBytes) {
+    if (!shouldPreSplitSource(config) || fileSize <= splitMinBytes) {
       plan.files.push({
         filePath,
-        encoding: config.originalEncoding,
+        encoding: resolvePreparedFileEncoding(source, filePath, config),
         sourceFileName,
       });
       continue;
@@ -300,7 +306,7 @@ async function splitLargeDelimitedFile(
   return chunkFiles;
 }
 
-async function writeDelimitedRow(
+export async function writeDelimitedRow(
   stream: WriteStream,
   values: string[],
   delimiter: string,
@@ -311,7 +317,7 @@ async function writeDelimitedRow(
   }
 }
 
-async function closeStream(stream: WriteStream): Promise<void> {
+export async function closeStream(stream: WriteStream): Promise<void> {
   if (stream.closed || stream.destroyed) {
     return;
   }
@@ -387,7 +393,7 @@ function createDecodedInputStream(
   return createReadStream(filePath).pipe(createAsvpRepairStream());
 }
 
-function createAsvpRepairStream(): Transform {
+export function createAsvpRepairStream(): Transform {
   return new Transform({
     transform: (chunk, _encoding, callback) => {
       const buffer = Buffer.isBuffer(chunk)
@@ -402,7 +408,7 @@ function createAsvpRepairStream(): Transform {
   });
 }
 
-function parseDelimitedLine(line: string, delimiter: string): string[] {
+export function parseDelimitedLine(line: string, delimiter: string): string[] {
   const values: string[] = [];
   let currentValue = "";
   let inQuotes = false;
@@ -434,7 +440,7 @@ function parseDelimitedLine(line: string, delimiter: string): string[] {
   return values;
 }
 
-function isCompleteDelimitedRecord(line: string): boolean {
+export function isCompleteDelimitedRecord(line: string): boolean {
   let inQuotes = false;
 
   for (let index = 0; index < line.length; index += 1) {
@@ -460,7 +466,7 @@ function cleanValue(value: string): string {
   return value.replace(/\r/g, "").trim();
 }
 
-function escapeDelimitedValue(value: string): string {
+export function escapeDelimitedValue(value: string): string {
   return `"${String(value || "").replace(/"/g, '""')}"`;
 }
 
@@ -471,7 +477,35 @@ function sanitizeFileSegment(value: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function extractYearFromDate(rawDate: string): string {
+function shouldPreSplitSource(config: SourceConfig): boolean {
+  const defaultValue = config.preSplitEnabledDefault !== false;
+
+  if (!config.preSplitEnabledEnv) {
+    return defaultValue;
+  }
+
+  const rawValue = process.env[config.preSplitEnabledEnv]?.trim();
+
+  if (!rawValue) {
+    return defaultValue;
+  }
+
+  return rawValue.toLowerCase() === "true";
+}
+
+export function extractYearFromDate(rawDate: string): string {
   const match = rawDate.match(/^(\d{2})\.(\d{2})\.(\d{4})/);
   return match?.[3] || "unknown";
+}
+
+function resolvePreparedFileEncoding(
+  source: RegistryImportSourceCode,
+  filePath: string,
+  config: SourceConfig,
+): PreparedFileEncoding {
+  if (source === "asvp" && filePath.split(path.sep).includes("split")) {
+    return "utf-8";
+  }
+
+  return config.originalEncoding;
 }

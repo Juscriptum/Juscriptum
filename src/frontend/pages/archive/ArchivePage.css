@@ -4,40 +4,12 @@
   gap: 24px;
 }
 
-.archive-summary-grid {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.archive-summary-card {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 20px;
-  border: 1px solid var(--border-color);
-  border-radius: 20px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), #f5f7fb);
-  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
-}
-
-.archive-summary-card span,
-.archive-summary-card small {
-  color: var(--text-secondary);
-}
-
-.archive-summary-card strong {
-  font-size: 2rem;
-  line-height: 1;
-  color: var(--text-primary);
-}
-
 .archive-tabs-panel,
 .archive-panel {
   padding: 20px;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--color-line);
   border-radius: 24px;
-  background: var(--surface-color);
+  background: var(--color-surface-strong);
   box-shadow: 0 20px 48px rgba(15, 23, 42, 0.08);
 }
 
@@ -55,7 +27,7 @@
   border: 1px solid rgba(148, 163, 184, 0.4);
   border-radius: 999px;
   background: #f8fafc;
-  color: var(--text-primary);
+  color: var(--color-ink-900);
   cursor: pointer;
   transition:
     border-color 0.2s ease,
@@ -98,7 +70,7 @@
   flex-direction: column;
   gap: 4px;
   margin-top: 16px;
-  color: var(--text-secondary);
+  color: var(--color-ink-500);
 }
 
 .archive-panel-header {
@@ -115,7 +87,7 @@
 
 .archive-panel-header p {
   margin: 0;
-  color: var(--text-secondary);
+  color: var(--color-ink-500);
 }
 
 .archive-list {
@@ -160,7 +132,7 @@
 }
 
 .archive-list-item span {
-  color: var(--text-secondary);
+  color: var(--color-ink-500);
 }
 
 .archive-item-meta {
@@ -177,13 +149,13 @@
   border: 1px dashed rgba(148, 163, 184, 0.45);
   border-radius: 20px;
   background: #f8fafc;
-  color: var(--text-secondary);
+  color: var(--color-ink-500);
 }
 
 .archive-empty-state strong {
   display: block;
   margin-bottom: 8px;
-  color: var(--text-primary);
+  color: var(--color-ink-900);
 }
 
 .archive-empty-state p {
@@ -196,17 +168,7 @@
   padding: 56px 0;
 }
 
-@media (max-width: 1100px) {
-  .archive-summary-grid {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
 @media (max-width: 720px) {
-  .archive-summary-grid {
-    grid-template-columns: 1fr;
-  }
-
   .archive-panel-header,
   .archive-list-item {
     flex-direction: column;

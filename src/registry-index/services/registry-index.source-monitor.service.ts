@@ -32,7 +32,12 @@ export class RegistryIndexSourceMonitorService
   constructor(private readonly registryIndexService: RegistryIndexService) {}
 
   async onApplicationBootstrap(): Promise<void> {
-    if (!shouldRunScheduledTasks() || this.intervalMs <= 0) {
+    if (!shouldRunScheduledTasks()) {
+      await this.warnIfSourceFilesNeedWorker();
+      return;
+    }
+
+    if (this.intervalMs <= 0) {
       return;
     }
 
@@ -109,20 +114,17 @@ export class RegistryIndexSourceMonitorService
     const directory = this.sourceDirectories[source];
 
     try {
-      const fileNames = (await readdir(directory))
-        .filter((fileName) => fileName.toLowerCase().endsWith(".csv"))
-        .sort();
+      const filePaths = await this.listCsvFilesRecursively(directory);
 
-      if (fileNames.length === 0) {
+      if (filePaths.length === 0) {
         return "";
       }
 
       const hash = crypto.createHash("sha256");
 
-      for (const fileName of fileNames) {
-        const filePath = path.join(directory, fileName);
+      for (const filePath of filePaths) {
         const fileStat = await stat(filePath);
-        hash.update(fileName);
+        hash.update(path.relative(directory, filePath));
         hash.update(String(fileStat.size));
         hash.update(String(fileStat.mtimeMs));
       }
@@ -139,7 +141,58 @@ export class RegistryIndexSourceMonitorService
     }
   }
 
+  private async listCsvFilesRecursively(directory: string): Promise<string[]> {
+    try {
+      const entries = await readdir(directory, { withFileTypes: true });
+      const filePaths: string[] = [];
+
+      for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name);
+
+        if (entry.isDirectory()) {
+          filePaths.push(...(await this.listCsvFilesRecursively(entryPath)));
+          continue;
+        }
+
+        if (entry.name.toLowerCase().endsWith(".csv")) {
+          filePaths.push(entryPath);
+        }
+      }
+
+      return filePaths.sort();
+    } catch (error) {
+      const errno = error as NodeJS.ErrnoException;
+
+      if (errno?.code === "ENOENT") {
+        return [];
+      }
+
+      throw error;
+    }
+  }
+
   private getSources(): MonitoredSource[] {
     return ["court_stan", "asvp", "court_dates"];
+  }
+
+  private async warnIfSourceFilesNeedWorker(): Promise<void> {
+    const sourcesWithPendingFiles: MonitoredSource[] = [];
+
+    for (const source of this.getSources()) {
+      const signature = await this.computeSourceDirectorySignature(source);
+
+      if (signature) {
+        sourcesWithPendingFiles.push(source);
+      }
+    }
+
+    if (sourcesWithPendingFiles.length === 0) {
+      return;
+    }
+
+    const sourceList = sourcesWithPendingFiles.join(", ");
+    this.logger.warn(
+      `Detected CSV files in ${sourceList}, but registry source monitoring is disabled in this process because RUN_SCHEDULED_JOBS=false. Start the dedicated worker or run npm run build:registry-index -- --source=<source> --force.`,
+    );
   }
 }

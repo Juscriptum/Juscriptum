@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 import { DataSource, DataSourceOptions } from "typeorm";
 import { normalizeLegacyDateTimeColumnsForDatabase } from "../common/typeorm/legacy-datetime-column-type";
+import { DATABASE_ENTITIES } from "../database/entities";
 
 type EnvMap = Record<string, string>;
 
@@ -76,8 +77,8 @@ function buildPostgresOptions(): DataSourceOptions {
 
   const baseOptions: DataSourceOptions = {
     type: "postgres",
-    entities: [resolve(__dirname, "../database/entities/*.entity{.ts,.js}")],
-    migrations: [resolve(__dirname, "../database/migrations/*{.ts,.js}")],
+    entities: [...DATABASE_ENTITIES],
+    migrations: [resolve(__dirname, "../database/migrations/[0-9]*-*.{ts,js}")],
     synchronize: false,
     logging: false,
   };
@@ -118,8 +119,8 @@ function buildSqliteOptions(): DataSourceOptions {
   return {
     type: "better-sqlite3",
     database: getEnv("DB_NAME", "DATABASE_NAME") || "law_organizer.db",
-    entities: [resolve(__dirname, "../database/entities/*.entity{.ts,.js}")],
-    migrations: [resolve(__dirname, "../database/migrations/*{.ts,.js}")],
+    entities: [...DATABASE_ENTITIES],
+    migrations: [resolve(__dirname, "../database/migrations/[0-9]*-*.{ts,js}")],
     synchronize: false,
     logging: false,
   };

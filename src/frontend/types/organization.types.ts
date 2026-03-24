@@ -99,3 +99,21 @@ export interface OnboardingStep {
   completed: boolean;
   completedAt: Date | null;
 }
+
+export type RegistryImportSourceCode = "court_stan" | "court_dates" | "asvp";
+
+export interface RegistryImportStateSummary {
+  sourceCode: RegistryImportSourceCode;
+  sourceLabel: string;
+  available: boolean;
+  datasetUrl: string | null;
+  resourceName: string | null;
+  resourceUrl: string | null;
+  remoteUpdatedAt: string | null;
+  lastDownloadedAt: string | null;
+  lastIndexedAt: string | null;
+  lastSuccessAt: string | null;
+  lastStatus: string | null;
+  lastError: string | null;
+  rowsImported: number;
+}

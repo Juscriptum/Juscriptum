@@ -1,5 +1,6 @@
 import { Logger } from "@nestjs/common";
 import { RegistryIndexService } from "../registry-index/services/registry-index.service";
+import { loadScriptEnv } from "./load-script-env";
 
 function parseArgs(argv: string[]): {
   source?: "court_stan" | "asvp" | "court_dates";
@@ -17,6 +18,7 @@ function parseArgs(argv: string[]): {
 }
 
 async function main() {
+  loadScriptEnv();
   const logger = new Logger("BuildRegistryIndexScript");
   const options = parseArgs(process.argv.slice(2));
   const service = new RegistryIndexService();

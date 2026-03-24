@@ -21,6 +21,7 @@ out
 *.swp
 *.swo
 *~
+.codex
 
 # Git
 .git
@@ -62,6 +63,7 @@ Thumbs.db
 tmp
 temp
 *.tmp
+sync.ffs_lock
 
 # Database
 *.db
@@ -82,3 +84,7 @@ storage
 .claude
 .firebase
 .sentryclirc
+asvp
+figma
+.venv
+.venv*

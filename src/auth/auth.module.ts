@@ -3,6 +3,7 @@ import { JwtModule } from "@nestjs/jwt";
 import { PassportModule } from "@nestjs/passport";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule, ConfigService } from "@nestjs/config";
+import { RegistryIndexModule } from "../registry-index/registry-index.module";
 
 // Entities
 import { User } from "../database/entities/User.entity";
@@ -33,13 +34,19 @@ import { RefreshStrategy } from "./strategies/refresh.strategy";
 
 // Guards
 import { JwtAuthGuard } from "./guards";
-import { TenantGuard, RbacGuard, SubscriptionGuard } from "./guards";
+import {
+  TenantGuard,
+  RbacGuard,
+  SubscriptionGuard,
+  SuperAdminGuard,
+} from "./guards";
 
 /**
  * Auth Module
  */
 @Module({
   imports: [
+    RegistryIndexModule,
     TypeOrmModule.forFeature([
       User,
       Organization,
@@ -100,6 +107,7 @@ import { TenantGuard, RbacGuard, SubscriptionGuard } from "./guards";
     TenantGuard,
     RbacGuard,
     SubscriptionGuard,
+    SuperAdminGuard,
   ],
   exports: [
     AuthService,
@@ -111,6 +119,7 @@ import { TenantGuard, RbacGuard, SubscriptionGuard } from "./guards";
     TenantGuard,
     RbacGuard,
     SubscriptionGuard,
+    SuperAdminGuard,
   ],
 })
 export class AuthModule {}

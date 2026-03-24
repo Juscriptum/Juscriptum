@@ -36,6 +36,12 @@ export class EnvironmentValidator {
       description: "JWT secret key for refresh tokens",
     });
 
+    this.validateVariable("PLATFORM_ADMIN_JWT_SECRET", isProduction, errors, {
+      minLength: 32,
+      description:
+        "JWT secret key for platform-admin access and refresh tokens",
+    });
+
     this.validateVariable("ENCRYPTION_KEY", isProduction, errors, {
       minLength: 64,
       sensitive: true,
@@ -221,6 +227,12 @@ export class EnvironmentValidator {
     const nodeEnv = this.configService.get<string>("NODE_ENV", "development");
     const jwtSecret = this.configService.get<string>("JWT_SECRET");
     const dbSync = this.configService.get<string>("DB_SYNC", "true");
+    const platformAdminJwtSecret = this.configService.get<string>(
+      "PLATFORM_ADMIN_JWT_SECRET",
+    );
+    const platformAdminBootstrapToken = this.configService.get<string>(
+      "PLATFORM_ADMIN_BOOTSTRAP_TOKEN",
+    );
 
     // Warn about default secrets
     if (
@@ -229,6 +241,27 @@ export class EnvironmentValidator {
     ) {
       this.logger.warn(
         "WARNING: Using default/weak JWT secret. Set a strong, unique JWT_SECRET in production!",
+      );
+    }
+
+    if (
+      platformAdminJwtSecret &&
+      (platformAdminJwtSecret.includes("your-secret") ||
+        platformAdminJwtSecret.includes("dev-only") ||
+        platformAdminJwtSecret.includes("CHANGE_ME"))
+    ) {
+      this.logger.warn(
+        "WARNING: Using default/weak PLATFORM_ADMIN_JWT_SECRET. Set a strong, unique secret for the owner back office.",
+      );
+    }
+
+    if (
+      platformAdminBootstrapToken &&
+      (platformAdminBootstrapToken.length < 24 ||
+        platformAdminBootstrapToken.includes("CHANGE_ME"))
+    ) {
+      this.logger.warn(
+        "WARNING: PLATFORM_ADMIN_BOOTSTRAP_TOKEN is weak or placeholder-like. Use a long random one-time secret and remove it after first-owner bootstrap.",
       );
     }
 

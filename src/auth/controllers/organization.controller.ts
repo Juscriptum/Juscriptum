@@ -25,6 +25,7 @@ import { JwtAuthGuard, RbacGuard } from "../guards";
 import { Roles } from "../decorators/access-control.decorators";
 import { UserRole } from "../../database/entities/enums/subscription.enum";
 import type { Request } from "express";
+import { RegistryIndexService } from "../../registry-index/services/registry-index.service";
 
 /**
  * Organization Controller
@@ -35,6 +36,7 @@ export class OrganizationController {
   constructor(
     private readonly authService: AuthService,
     private readonly organizationService: OrganizationService,
+    private readonly registryIndexService: RegistryIndexService,
   ) {}
 
   @Post("register")
@@ -61,6 +63,21 @@ export class OrganizationController {
   async getOrganization(@Req() req: Request): Promise<any> {
     const tenantId = (req as any).user?.tenant_id;
     return this.organizationService.getOrganizationById(tenantId);
+  }
+
+  @Get("me/registry-imports")
+  @UseGuards(JwtAuthGuard, RbacGuard)
+  @Roles(UserRole.ORGANIZATION_OWNER, UserRole.ORGANIZATION_ADMIN)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Get registry dataset metadata and last import state",
+  })
+  @ApiResponse({
+    status: 200,
+    description: "Registry metadata retrieved",
+  })
+  async getRegistryImports(): Promise<any> {
+    return this.registryIndexService.getImportStateSummaries();
   }
 
   @Put("me")

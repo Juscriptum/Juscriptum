@@ -1,5 +1,5 @@
 import * as iconv from "iconv-lite";
-import { mkdtemp, mkdir, rm, stat, writeFile } from "fs/promises";
+import { mkdtemp, mkdir, readdir, rm, stat, writeFile } from "fs/promises";
 import * as os from "os";
 import * as path from "path";
 import Database = require("better-sqlite3");
@@ -22,6 +22,9 @@ describe("RegistryIndexService", () => {
     process.env.COURT_DATES_DELETE_IMPORTED_FILES;
   const originalAsvpSplitMinBytes = process.env.ASVP_PRE_SPLIT_MIN_BYTES;
   const originalAsvpSplitRowsPerFile = process.env.ASVP_SPLIT_ROWS_PER_FILE;
+  const originalAsvpPreSplitEnabled = process.env.ASVP_PRE_SPLIT_ENABLED;
+  const originalAsvpInsertRowsPerTransaction =
+    process.env.ASVP_INSERT_ROWS_PER_TRANSACTION;
   const originalDeleteImportedAsvpFiles =
     process.env.ASVP_DELETE_IMPORTED_FILES;
 
@@ -72,6 +75,11 @@ describe("RegistryIndexService", () => {
     );
     restoreEnv("ASVP_PRE_SPLIT_MIN_BYTES", originalAsvpSplitMinBytes);
     restoreEnv("ASVP_SPLIT_ROWS_PER_FILE", originalAsvpSplitRowsPerFile);
+    restoreEnv("ASVP_PRE_SPLIT_ENABLED", originalAsvpPreSplitEnabled);
+    restoreEnv(
+      "ASVP_INSERT_ROWS_PER_TRANSACTION",
+      originalAsvpInsertRowsPerTransaction,
+    );
     restoreEnv("ASVP_DELETE_IMPORTED_FILES", originalDeleteImportedAsvpFiles);
     await rm(tempDirectory, { recursive: true, force: true });
   });
@@ -299,7 +307,145 @@ describe("RegistryIndexService", () => {
     expect(results[0].sourceLabel).toBe("Реєстр виконавчих проваджень");
   });
 
-  it("splits oversized asvp snapshots before import, deletes the source on success, and keeps the shared index when the folder is empty", async () => {
+  it("imports streamed utf-8 asvp split files from a nested split directory", async () => {
+    await mkdir(path.join(tempDirectory, "asvp", "split"), { recursive: true });
+    await writeFile(
+      path.join(tempDirectory, "asvp", "split", "asvp-2026.csv"),
+      [
+        '"DEBTOR_NAME","DEBTOR_BIRTHDATE","DEBTOR_CODE","CREDITOR_NAME","CREDITOR_CODE","VP_ORDERNUM","VP_BEGINDATE","VP_STATE","ORG_NAME","DVS_CODE","PHONE_NUM","EMAIL_ADDR","BANK_ACCOUNT"',
+        '"Палінкаш Андрій Андрійович","08.12.1976 00:00:00","","ДЕРЖАВНА СУДОВА АДМІНІСТРАЦІЯ УКРАЇНИ","26255795","80184995","06.02.2026 00:00:00","Завершено","Тячівський відділ державної виконавчої служби","34982020","(03134)3-33-14","tiach.vdvs.zk@ifminjust.gov.ua","UA768201720355279000000700866"',
+      ].join("\n"),
+      "utf-8",
+    );
+
+    await service.rebuildIndexes({ source: "asvp", force: true });
+
+    const results = await service.searchAsvpRegistry({
+      query: "Палінкаш Андрій Андрійович",
+    });
+
+    expect(results).toHaveLength(1);
+    expect(results[0].caseNumber).toBe("80184995");
+  });
+
+  it("stores fresh asvp shard indexes separately from shared registry data", async () => {
+    await writeFile(
+      path.join(tempDirectory, "asvp", "registry.csv"),
+      iconv.encode(
+        [
+          "DEBTOR_NAME,DEBTOR_BIRTHDATE,DEBTOR_CODE,CREDITOR_NAME,CREDITOR_CODE,VP_ORDERNUM,VP_BEGINDATE,VP_STATE,ORG_NAME,DVS_CODE,PHONE_NUM,EMAIL_ADDR,BANK_ACCOUNT",
+          '"Палінкаш Андрій Андрійович","08.12.1976 00:00:00","","ДЕРЖАВНА СУДОВА АДМІНІСТРАЦІЯ УКРАЇНИ","26255795","80184995","06.02.2026 00:00:00","Завершено","Тячівський відділ державної виконавчої служби","34982020","(03134)3-33-14","tiach.vdvs.zk@ifminjust.gov.ua","UA768201720355279000000700866"',
+        ].join("\n"),
+        "cp1251",
+      ),
+    );
+
+    await service.rebuildIndexes({ source: "asvp", force: true });
+
+    const sharedDb = new Database(
+      path.join(tempDirectory, "storage", "registry-index.db"),
+      {
+        readonly: true,
+      },
+    );
+    const asvpMetadataDb = new Database(
+      path.join(tempDirectory, "storage", "asvp-index.db"),
+      {
+        readonly: true,
+      },
+    );
+    const shardDirectory = path.join(
+      tempDirectory,
+      "storage",
+      "asvp-index-shards",
+    );
+    const shardFileNames = await readdir(shardDirectory);
+    const sharedAsvpTable = sharedDb
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asvp_records' LIMIT 1`,
+      )
+      .get() as { name?: string } | undefined;
+    const metadataAsvpTable = asvpMetadataDb
+      .prepare(
+        `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'asvp_records' LIMIT 1`,
+      )
+      .get() as { name?: string } | undefined;
+    const shardDb = new Database(path.join(shardDirectory, "asvp-2026.db"), {
+      readonly: true,
+    });
+    const asvpRowCount = shardDb
+      .prepare(`SELECT COUNT(*) AS count FROM asvp_records`)
+      .get() as { count: number };
+    sharedDb.close();
+    asvpMetadataDb.close();
+    shardDb.close();
+
+    expect(sharedAsvpTable).toBeUndefined();
+    expect(metadataAsvpTable).toBeUndefined();
+    expect(shardFileNames.sort()).toEqual(["asvp-2026.db"]);
+    expect(asvpRowCount.count).toBe(1);
+  });
+
+  it("returns registry import state summaries with labels, timestamps, and availability", async () => {
+    await service.upsertImportState("court_stan", {
+      resource_name: "registry.csv",
+      remote_updated_at: "2026-03-20T09:00:00.000Z",
+      last_downloaded_at: "2026-03-20T09:15:00.000Z",
+      last_indexed_at: "2026-03-20T09:20:00.000Z",
+      last_success_at: "2026-03-20T09:20:00.000Z",
+      last_status: "success",
+      rows_imported: 1024,
+    });
+    await service.upsertImportState("court_dates", {
+      resource_name: "dates.csv",
+      remote_updated_at: "2026-03-21T07:00:00.000Z",
+      last_downloaded_at: "2026-03-21T07:10:00.000Z",
+      last_status: "running",
+      rows_imported: 256,
+    });
+    await service.upsertImportState("asvp", {
+      resource_name: "asvp.csv",
+      remote_updated_at: "2026-03-22T08:00:00.000Z",
+      last_downloaded_at: "2026-03-22T08:40:00.000Z",
+      last_indexed_at: "2026-03-22T08:55:00.000Z",
+      last_status: "failed",
+      last_error: "database or disk is full",
+      rows_imported: 0,
+    });
+
+    const summaries = await service.getImportStateSummaries();
+
+    expect(summaries).toEqual([
+      expect.objectContaining({
+        sourceCode: "court_stan",
+        sourceLabel: "Судовий реєстр",
+        available: true,
+        resourceName: "registry.csv",
+        remoteUpdatedAt: "2026-03-20T09:00:00.000Z",
+        lastStatus: "success",
+        rowsImported: 1024,
+      }),
+      expect.objectContaining({
+        sourceCode: "court_dates",
+        sourceLabel: "Дати судових засідань",
+        available: false,
+        resourceName: "dates.csv",
+        lastStatus: "running",
+        rowsImported: 256,
+      }),
+      expect.objectContaining({
+        sourceCode: "asvp",
+        sourceLabel: "Реєстр виконавчих проваджень",
+        available: false,
+        resourceName: "asvp.csv",
+        lastStatus: "failed",
+        lastError: "database or disk is full",
+        rowsImported: 0,
+      }),
+    ]);
+  });
+
+  it("builds yearly asvp shard databases, deletes the source on success, and keeps the index when the folder is empty", async () => {
     process.env.ASVP_PRE_SPLIT_MIN_BYTES = "1";
     process.env.ASVP_SPLIT_ROWS_PER_FILE = "1";
     process.env.ASVP_DELETE_IMPORTED_FILES = "true";
@@ -336,6 +482,11 @@ describe("RegistryIndexService", () => {
 
     await expect(stat(sourcePath)).rejects.toThrow();
     expect(await service.isIndexAvailableFor("asvp")).toBe(true);
+    expect(
+      (await readdir(path.join(tempDirectory, "storage", "asvp-index-shards")))
+        .filter((fileName) => fileName.endsWith(".db"))
+        .sort(),
+    ).toEqual(["asvp-2025.db", "asvp-2026.db"]);
 
     const debtorResults = await service.searchAsvpRegistry({
       query: "Палінкаш Андрій Андрійович",
@@ -354,6 +505,32 @@ describe("RegistryIndexService", () => {
     });
 
     expect(resultsAfterEmptyFolderRebuild).toHaveLength(1);
+  });
+
+  it("keeps the original asvp parse error in import_state instead of replacing it with a rollback error", async () => {
+    process.env.ASVP_INSERT_ROWS_PER_TRANSACTION = "1";
+
+    await writeFile(
+      path.join(tempDirectory, "asvp", "registry.csv"),
+      iconv.encode(
+        [
+          "DEBTOR_NAME,DEBTOR_BIRTHDATE,DEBTOR_CODE,CREDITOR_NAME,CREDITOR_CODE,VP_ORDERNUM,VP_BEGINDATE,VP_STATE,ORG_NAME,DVS_CODE,PHONE_NUM,EMAIL_ADDR,BANK_ACCOUNT",
+          '"Палінкаш Андрій Андрійович","08.12.1976 00:00:00","","ДЕРЖАВНА СУДОВА АДМІНІСТРАЦІЯ УКРАЇНИ","26255795","80184995","06.02.2026 00:00:00","Завершено","Тячівський відділ державної виконавчої служби","34982020","(03134)3-33-14"',
+        ].join("\n"),
+        "cp1251",
+      ),
+    );
+
+    await expect(
+      service.rebuildIndexes({ source: "asvp", force: true }),
+    ).rejects.toThrow("Invalid delimited row in registry.csv");
+
+    const importState = await service.getImportState("asvp");
+
+    expect(importState?.last_status).toBe("failed");
+    expect(importState?.last_error).toBe(
+      "Invalid delimited row in registry.csv",
+    );
   });
 
   it("migrates legacy raw_row_json columns out of shared registry tables while preserving searchable data", async () => {
@@ -410,19 +587,10 @@ describe("RegistryIndexService", () => {
       );
       CREATE INDEX idx_asvp_vp_ordernum
         ON asvp_records(vp_ordernum);
-      CREATE INDEX idx_asvp_debtor_name_normalized
-        ON asvp_records(debtor_name_normalized);
-      CREATE INDEX idx_asvp_creditor_name_normalized
-        ON asvp_records(creditor_name_normalized);
-      CREATE INDEX idx_asvp_org_name_normalized
-        ON asvp_records(org_name_normalized);
       CREATE VIRTUAL TABLE asvp_records_fts
         USING fts5(
-          debtor_name,
           debtor_name_normalized,
-          creditor_name,
           creditor_name_normalized,
-          org_name,
           org_name_normalized,
           content='asvp_records',
           content_rowid='id',
@@ -547,22 +715,16 @@ describe("RegistryIndexService", () => {
         `
         INSERT INTO asvp_records_fts (
           rowid,
-          debtor_name,
           debtor_name_normalized,
-          creditor_name,
           creditor_name_normalized,
-          org_name,
           org_name_normalized
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?)
         `,
       )
       .run(
         1,
-        "Палінкаш Андрій Андрійович",
         "палінкаш андрій андрійович",
-        "ДЕРЖАВНА СУДОВА АДМІНІСТРАЦІЯ УКРАЇНИ",
         "державна судова адміністрація україни",
-        "Тячівський відділ державної виконавчої служби",
         "тячівський відділ державної виконавчої служби",
       );
     legacyDb

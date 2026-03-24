@@ -123,6 +123,7 @@ export interface NextCaseNumberResponse {
 }
 
 export type RegistrySearchSource = "court_registry" | "asvp";
+export type RegistryResultSource = RegistrySearchSource | "court_dates";
 
 export interface RegistrySearchFilters {
   query?: string;
@@ -139,7 +140,7 @@ export interface RegistrySearchFilters {
 }
 
 export interface CaseRegistrySearchResult {
-  source: RegistrySearchSource;
+  source: RegistryResultSource;
   sourceLabel: string;
   person: string;
   role: string;
@@ -173,7 +174,7 @@ export interface RegistryHearingSuggestion {
 }
 
 export interface TimelineEvent {
-  type: "event" | "document";
+  type: "event" | "document" | "registry_stage";
   date: string;
   data: any;
 }

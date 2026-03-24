@@ -12,13 +12,38 @@ import {
 import { Spinner } from "../../components/Spinner";
 import { Alert } from "../../components/Alert";
 import { PageHeader } from "../../components/PageHeader";
+import { Breadcrumbs } from "../../components/navigation";
 import { DateRangePicker } from "../../components/DateRangePicker";
 import { RecordActionsMenu } from "../../components/RecordActionsMenu";
+import {
+  RegistryEmptyState,
+  RegistryFilterBar,
+  RegistryFilterGroup,
+  RegistryLoadingState,
+  RegistryPagination,
+  RegistrySearchField,
+  RegistrySurface,
+  RegistryTableShell,
+} from "../../components/registry";
 import {
   CASE_CATEGORY_OPTIONS,
   getCaseTypeLabel as getCaseTypeLabelText,
 } from "../../utils/caseCategories";
 import "./CasesPage.css";
+
+const buildCalendarEventLink = (eventId?: string, date?: string) => {
+  if (!eventId) {
+    return "";
+  }
+
+  const params = new URLSearchParams({ eventId });
+
+  if (date) {
+    params.set("date", date);
+  }
+
+  return `/calendar?${params.toString()}`;
+};
 
 /**
  * Cases List Page
@@ -137,7 +162,7 @@ export const CasesPage: React.FC = () => {
       setTimelineData(timeline);
       setShowTimeline(caseId);
     } catch (err: any) {
-      setError(err.message || "Помилка завантаження timeline");
+      setError(err.message || "Помилка завантаження подій по справі");
     } finally {
       setTimelineLoading(false);
     }
@@ -213,9 +238,10 @@ export const CasesPage: React.FC = () => {
 
   return (
     <div className="cases-page">
+      <Breadcrumbs />
       <PageHeader
         title="Мої справи"
-        subtitle="Операційний реєстр справ, строків і статусів з прямим переходом до документів та timeline"
+        subtitle="Операційний реєстр справ, строків і статусів з прямим переходом до документів та подій по справі"
         actions={
           <button
             className="btn btn-primary"
@@ -241,29 +267,14 @@ export const CasesPage: React.FC = () => {
         <Alert type="error" message={error} onClose={() => setError(null)} />
       )}
 
-      <section className="cases-registry">
-        <div className="filters-bar">
-          <div className="search-box">
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <circle cx="11" cy="11" r="8" />
-              <line x1="21" y1="21" x2="16.65" y2="16.65" />
-            </svg>
-            <input
-              type="text"
-              placeholder="Пошук справ..."
-              value={filters.search || ""}
-              onChange={(e) => handleSearch(e.target.value)}
-            />
-          </div>
-          <div className="filters-date-range">
-            <span className="filters-date-range__label">Дата відкриття</span>
+      <RegistrySurface className="cases-registry">
+        <RegistryFilterBar className="cases-registry-filters">
+          <RegistrySearchField
+            placeholder="Пошук справ..."
+            value={filters.search || ""}
+            onChange={handleSearch}
+          />
+          <RegistryFilterGroup label="Дата відкриття">
             <DateRangePicker
               fromValue={filters.startDateFrom}
               toValue={filters.startDateTo}
@@ -275,7 +286,7 @@ export const CasesPage: React.FC = () => {
               }
               max={todayIso}
             />
-          </div>
+          </RegistryFilterGroup>
           <select
             value={filters.caseType || ""}
             onChange={(e) =>
@@ -321,40 +332,42 @@ export const CasesPage: React.FC = () => {
           >
             Скинути
           </button>
-        </div>
+        </RegistryFilterBar>
 
         {loading ? (
-          <div className="loading-container">
-            <Spinner size="large" />
-          </div>
+          <RegistryLoadingState />
         ) : cases.length === 0 ? (
-          <div className="empty-state">
-            <svg
-              width="64"
-              height="64"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-            >
-              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-            </svg>
-            <h3>Справ не знайдено</h3>
-            <p>
-              {filters.clientId
+          <RegistryEmptyState
+            icon={
+              <svg
+                width="64"
+                height="64"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.5"
+              >
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+            }
+            title="Справ не знайдено"
+            description={
+              filters.clientId
                 ? "Для цього клієнта ще немає справ."
-                : "Створіть першу справу, щоб почати роботу."}
-            </p>
-            <button
-              className="btn btn-primary"
-              onClick={() => navigate("/cases/add")}
-            >
-              Нова справа
-            </button>
-          </div>
+                : "Створіть першу справу, щоб почати роботу."
+            }
+            action={
+              <button
+                className="btn btn-primary"
+                onClick={() => navigate("/cases/add")}
+              >
+                Нова справа
+              </button>
+            }
+          />
         ) : (
           <>
-            <div className="cases-table">
+            <RegistryTableShell className="cases-table">
               <table>
                 <thead>
                   <tr>
@@ -472,7 +485,7 @@ export const CasesPage: React.FC = () => {
                               to: `/documents?caseId=${caseItem.id}`,
                             },
                             {
-                              label: "Timeline справи",
+                              label: "Події по справі",
                               onClick: () => loadTimeline(caseItem.id),
                             },
                             {
@@ -495,32 +508,20 @@ export const CasesPage: React.FC = () => {
                   ))}
                 </tbody>
               </table>
-            </div>
+            </RegistryTableShell>
 
             {totalPages > 1 && (
-              <div className="pagination">
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === 1}
-                  onClick={() => handlePageChange(page - 1)}
-                >
-                  Попередня
-                </button>
-                <span className="page-info">
-                  Сторінка {page} з {totalPages} ({total} записів)
-                </span>
-                <button
-                  className="btn btn-secondary"
-                  disabled={page === totalPages}
-                  onClick={() => handlePageChange(page + 1)}
-                >
-                  Наступна
-                </button>
-              </div>
+              <RegistryPagination
+                page={page}
+                totalPages={totalPages}
+                totalItems={total}
+                onPrevious={() => handlePageChange(page - 1)}
+                onNext={() => handlePageChange(page + 1)}
+              />
             )}
           </>
         )}
-      </section>
+      </RegistrySurface>
 
       {showTimeline && (
         <TimelineModal
@@ -551,7 +552,7 @@ const TimelineModal: React.FC<TimelineModalProps> = ({
     <div className="modal-overlay">
       <div className="modal modal-lg">
         <div className="modal-header">
-          <h2>Timeline справи {caseId}</h2>
+          <h2>Події по справі {caseId}</h2>
           <button className="modal-close" onClick={onClose}>
             <svg
               width="24"
@@ -573,7 +574,7 @@ const TimelineModal: React.FC<TimelineModalProps> = ({
             </div>
           ) : timeline.length === 0 ? (
             <div className="empty-timeline">
-              <p>Немає подій у timeline</p>
+              <p>Немає подій по справі</p>
             </div>
           ) : (
             <div className="timeline">
@@ -626,9 +627,21 @@ const TimelineModal: React.FC<TimelineModalProps> = ({
                       })}
                     </div>
                     <div className="timeline-title">
-                      {event.type === "event"
-                        ? event.data.title
-                        : event.data.originalName}
+                      {event.type === "event" ? (
+                        <Link
+                          to={buildCalendarEventLink(
+                            event.data?.id,
+                            event.date,
+                          )}
+                          className="timeline-link"
+                        >
+                          {event.data.title}
+                        </Link>
+                      ) : event.type === "document" ? (
+                        event.data.originalName
+                      ) : (
+                        event.data.stageName || event.data.title
+                      )}
                     </div>
                     {event.data.description && (
                       <div className="timeline-description">

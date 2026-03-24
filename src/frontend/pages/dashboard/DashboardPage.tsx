@@ -8,6 +8,7 @@ import { TasksWidget } from "./components/TasksWidget";
 import { Spinner } from "../../components/Spinner";
 import { Alert } from "../../components/Alert";
 import { PageHeader } from "../../components/PageHeader";
+import { Breadcrumbs } from "../../components/navigation";
 import { formatCurrencyAmount } from "../../utils/currency";
 import "./DashboardPage.css";
 
@@ -39,6 +40,7 @@ export const DashboardPage: React.FC = () => {
 
   return (
     <div className="dashboard-page">
+      <Breadcrumbs />
       <PageHeader
         title="Дашборд"
         subtitle="Ключові показники, активність і найближчі події без зайвого шуму"

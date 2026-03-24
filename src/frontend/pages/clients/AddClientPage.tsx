@@ -22,6 +22,7 @@ import {
 import { Alert } from "../../components/Alert";
 import { Spinner } from "../../components/Spinner";
 import { PageHeader } from "../../components/PageHeader";
+import { Breadcrumbs } from "../../components/navigation";
 import { FormActionBar } from "../../components/FormActionBar";
 import { RegistrySearchOverlay } from "../../components/RegistrySearchOverlay";
 import { ClientForm } from "../../components/clients";
@@ -281,6 +282,7 @@ export const AddClientPage: React.FC = () => {
 
   return (
     <div className="add-client-page">
+      <Breadcrumbs />
       <PageHeader title="Новий клієнт" />
 
       {error && (
@@ -291,8 +293,8 @@ export const AddClientPage: React.FC = () => {
 
       {selectedRegistryRecord && (
         <Alert type="info" onClose={() => setSelectedRegistryRecord(null)}>
-          Дані з реєстру перенесено у форму клієнта. Перевірте поля та
-          збережіть картку, коли будете готові.
+          Дані з реєстру перенесено у форму клієнта. Перевірте поля та збережіть
+          картку, коли будете готові.
         </Alert>
       )}
 

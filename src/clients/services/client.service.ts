@@ -5,9 +5,10 @@ import {
   ConflictException,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Brackets, Repository, IsNull } from "typeorm";
+import { Brackets, Repository, IsNull, In } from "typeorm";
 import { Client } from "../../database/entities/Client.entity";
 import { Case } from "../../database/entities/Case.entity";
+import { Event } from "../../database/entities/Event.entity";
 import { ClientNumberRelease } from "../../database/entities/ClientNumberRelease.entity";
 import { Organization } from "../../database/entities/Organization.entity";
 import {
@@ -46,6 +47,8 @@ export class ClientService {
     private readonly clientRepository: Repository<Client>,
     @InjectRepository(Case)
     private readonly caseRepository: Repository<Case>,
+    @InjectRepository(Event)
+    private readonly eventRepository: Repository<Event>,
     @InjectRepository(ClientNumberRelease)
     private readonly clientNumberReleaseRepository: Repository<ClientNumberRelease>,
     @InjectRepository(Organization)
@@ -336,6 +339,12 @@ export class ClientService {
       return this.clientRepository.manager.transaction(async (manager) => {
         const clientRepository = manager.getRepository(Client);
         const caseRepository = manager.getRepository(Case);
+        const eventRepository = manager.getRepository(Event);
+        const relatedCaseIds = await this.getActiveClientCaseIds(
+          caseRepository,
+          tenantId,
+          id,
+        );
 
         const savedClient = await clientRepository.save(client);
 
@@ -350,6 +359,20 @@ export class ClientService {
             updatedBy: userId,
           },
         );
+
+        if (relatedCaseIds.length > 0) {
+          await eventRepository.update(
+            {
+              tenantId,
+              caseId: In(relatedCaseIds),
+              deletedAt: IsNull(),
+            },
+            {
+              status: "archived",
+              updatedBy: userId,
+            },
+          );
+        }
 
         return savedClient;
       });
@@ -386,9 +409,15 @@ export class ClientService {
     await this.clientRepository.manager.transaction(async (manager) => {
       const clientRepository = manager.getRepository(Client);
       const caseRepository = manager.getRepository(Case);
+      const eventRepository = manager.getRepository(Event);
       const clientNumberReleaseRepository =
         manager.getRepository(ClientNumberRelease);
       const deletedAt = new Date();
+      const relatedCaseIds = await this.getActiveClientCaseIds(
+        caseRepository,
+        tenantId,
+        id,
+      );
 
       if (dto.releaseClientNumber && clientNumberValue !== null) {
         const existingRelease = await clientNumberReleaseRepository.findOne({
@@ -428,6 +457,20 @@ export class ClientService {
           updatedBy: userId,
         },
       );
+
+      if (relatedCaseIds.length > 0) {
+        await eventRepository.update(
+          {
+            tenantId,
+            caseId: In(relatedCaseIds),
+            deletedAt: IsNull(),
+          },
+          {
+            deletedAt,
+            updatedBy: userId,
+          },
+        );
+      }
     });
   }
 
@@ -735,6 +778,23 @@ export class ClientService {
         ? numericValue
         : maxValue;
     }, 0);
+  }
+
+  private async getActiveClientCaseIds(
+    caseRepository: Repository<Case>,
+    tenantId: string,
+    clientId: string,
+  ): Promise<string[]> {
+    const relatedCases = await caseRepository.find({
+      where: {
+        tenantId,
+        clientId,
+        deletedAt: IsNull(),
+      },
+      select: ["id"],
+    });
+
+    return relatedCases.map((caseItem) => caseItem.id);
   }
 
   private getClientNumberString(

@@ -5,6 +5,7 @@ import { NotFoundException, ForbiddenException } from "@nestjs/common";
 import { ClientService } from "./client.service";
 import { Client } from "../../database/entities/Client.entity";
 import { Case } from "../../database/entities/Case.entity";
+import { Event } from "../../database/entities/Event.entity";
 import { ClientNumberRelease } from "../../database/entities/ClientNumberRelease.entity";
 import { Organization } from "../../database/entities/Organization.entity";
 import * as validationUtil from "../../common/utils/validation.util";
@@ -16,6 +17,7 @@ describe("ClientService", () => {
   let service: ClientService;
   let clientRepository: jest.Mocked<Repository<Client>>;
   let caseRepository: jest.Mocked<Repository<Case>>;
+  let eventRepository: jest.Mocked<Repository<Event>>;
   let clientNumberReleaseRepository: jest.Mocked<
     Repository<ClientNumberRelease>
   >;
@@ -91,6 +93,10 @@ describe("ClientService", () => {
             return caseRepository;
           }
 
+          if (entity === Event) {
+            return eventRepository;
+          }
+
           return clientNumberReleaseRepository;
         },
       }),
@@ -116,6 +122,13 @@ describe("ClientService", () => {
         {
           provide: getRepositoryToken(Case),
           useValue: {
+            find: jest.fn(),
+            update: jest.fn(),
+          },
+        },
+        {
+          provide: getRepositoryToken(Event),
+          useValue: {
             update: jest.fn(),
           },
         },
@@ -140,6 +153,7 @@ describe("ClientService", () => {
     service = module.get<ClientService>(ClientService);
     clientRepository = module.get(getRepositoryToken(Client));
     caseRepository = module.get(getRepositoryToken(Case));
+    eventRepository = module.get(getRepositoryToken(Event));
     clientNumberReleaseRepository = module.get(
       getRepositoryToken(ClientNumberRelease),
     );
@@ -169,7 +183,9 @@ describe("ClientService", () => {
     clientNumberReleaseRepository.remove.mockResolvedValue(
       {} as ClientNumberRelease,
     );
+    caseRepository.find.mockResolvedValue([]);
     caseRepository.update.mockResolvedValue({} as any);
+    eventRepository.update.mockResolvedValue({} as any);
     clientRepository.count.mockResolvedValue(0);
     organizationRepository.findOne.mockResolvedValue({
       subscriptionPlan: "professional",
@@ -754,7 +770,7 @@ describe("ClientService", () => {
   });
 
   describe("archive cascade", () => {
-    it("should archive all active client cases when client is archived", async () => {
+    it("should archive all active client cases and events when client is archived", async () => {
       clientRepository.findOne.mockResolvedValue({
         ...mockClient,
         status: "active",
@@ -763,6 +779,7 @@ describe("ClientService", () => {
         ...mockClient,
         status: "archived",
       } as unknown as Client);
+      caseRepository.find.mockResolvedValue([{ id: "case-1" } as Case]);
 
       const result = await service.update(
         mockTenantId,
@@ -784,7 +801,37 @@ describe("ClientService", () => {
           updatedBy: mockUserId,
         },
       );
+      expect(eventRepository.update).toHaveBeenCalledWith(
+        {
+          tenantId: mockTenantId,
+          caseId: expect.anything(),
+          deletedAt: expect.anything(),
+        },
+        {
+          status: "archived",
+          updatedBy: mockUserId,
+        },
+      );
       expect(result.status).toBe("archived");
+    });
+
+    it("should soft delete client events linked through client cases", async () => {
+      clientRepository.findOne.mockResolvedValue(mockClient);
+      caseRepository.find.mockResolvedValue([{ id: "case-1" } as Case]);
+
+      await service.delete(mockTenantId, mockClientId, mockUserId);
+
+      expect(eventRepository.update).toHaveBeenCalledWith(
+        {
+          tenantId: mockTenantId,
+          caseId: expect.anything(),
+          deletedAt: expect.anything(),
+        },
+        {
+          deletedAt: expect.any(Date),
+          updatedBy: mockUserId,
+        },
+      );
     });
   });
 

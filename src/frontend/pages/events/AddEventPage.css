@@ -152,6 +152,11 @@
     gap: 0.75rem;
 }
 
+.add-event-registry-btn {
+    width: fit-content;
+    min-height: 3.2rem;
+}
+
 .add-event-actions {
     display: flex;
     justify-content: flex-end;

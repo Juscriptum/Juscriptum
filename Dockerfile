@@ -49,12 +49,10 @@ COPY --from=builder --chown=nestjs:nodejs /app/node_modules ./node_modules
 # Copy built application
 COPY --from=builder --chown=nestjs:nodejs /app/dist ./dist
 
-# Create necessary directories with proper permissions
-RUN mkdir -p /app/uploads /app/logs && \
-    chown -R nestjs:nodejs /app
-
-# Set secure file permissions
-RUN chmod -R 755 /app && \
+# Create the only runtime-writable directories we need.
+RUN mkdir -p /app/uploads /app/logs /app/storage && \
+    chown -R nestjs:nodejs /app/uploads /app/logs /app/storage && \
+    chmod 755 /app /app/dist /app/storage && \
     chmod 700 /app/logs
 
 # Switch to non-root user

@@ -150,6 +150,7 @@ services:
       APP_URL: ${APP_URL}
       BASE_DOMAIN: ${BASE_DOMAIN:-law-organizer.ua}
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      DB_SYNC: ${DB_SYNC:-false}
       RUN_SCHEDULED_JOBS: "false"
       # Storage
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
@@ -299,6 +300,7 @@ services:
       REDIS_PASSWORD: ${REDIS_PASSWORD}
       REDIS_PREFIX: "law-org:"
       ALLOWED_ORIGINS: ${ALLOWED_ORIGINS}
+      DB_SYNC: ${DB_SYNC:-false}
       # Storage
       STORAGE_PROVIDER: ${STORAGE_PROVIDER:-s3}
       AWS_S3_BUCKET: ${AWS_S3_BUCKET:-law-organizer-uploads}

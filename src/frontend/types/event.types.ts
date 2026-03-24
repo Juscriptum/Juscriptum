@@ -10,7 +10,8 @@ export type CalendarEventStatus =
   | "in_progress"
   | "completed"
   | "cancelled"
-  | "rescheduled";
+  | "rescheduled"
+  | "archived";
 
 export type EventReminderUnit = "minutes" | "hours" | "days" | "weeks";
 export type EventRecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
@@ -18,7 +19,8 @@ export type EventRecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
 export interface EventCaseSummary {
   id: string;
   caseNumber: string;
-  title?: string;
+  registryCaseNumber?: string | null;
+  title?: string | null;
 }
 
 export interface EventParticipantMap {

@@ -24,6 +24,13 @@ export type EventType =
 
 export type EventReminderUnit = "minutes" | "hours" | "days" | "weeks";
 export type EventRecurrencePattern = "daily" | "weekly" | "monthly" | "yearly";
+export type EventStatus =
+  | "scheduled"
+  | "in_progress"
+  | "completed"
+  | "cancelled"
+  | "rescheduled"
+  | "archived";
 
 /**
  * Event Entity
@@ -131,12 +138,7 @@ export class Event {
     type: "varchar",
     default: "scheduled",
   })
-  status:
-    | "scheduled"
-    | "in_progress"
-    | "completed"
-    | "cancelled"
-    | "rescheduled";
+  status: EventStatus;
 
   @Column({ type: "text", nullable: true })
   notes: string;
