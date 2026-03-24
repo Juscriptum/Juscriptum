@@ -1,0 +1,1 @@
+const m=(s,i)=>{var t,n;const e=(n=(t=s==null?void 0:s.response)==null?void 0:t.data)==null?void 0:n.message;if(Array.isArray(e)){const a=e.map(g=>String(g).trim()).filter(Boolean);if(a.length>0)return a.join(". ")}return typeof e=="string"&&e.trim()?e:typeof s=="object"&&s&&"message"in s&&typeof s.message=="string"&&s.message.trim()?s.message:i};export{m as g};

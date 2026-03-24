@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/events/index.ts"],"sourcesContent":["export { EventsModule } from \"./events.module\";\n"],"names":["EventsModule"],"mappings":";;;;+BAASA;;;eAAAA,0BAAY;;;8BAAQ"}

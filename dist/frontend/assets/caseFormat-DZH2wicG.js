@@ -1,0 +1,1 @@
+function b(r,e="Не вказано"){var l,i,o;if(!r)return e;const t=(l=r.caseNumber)==null?void 0:l.trim(),n=(i=r.registryCaseNumber)==null?void 0:i.trim(),u=(o=r.title)==null?void 0:o.trim();return[t?`Внутрішній: ${t}`:null,n?`Реєстр: ${n}`:null,u||null].filter(Boolean).join(" • ")||e}export{b as f};

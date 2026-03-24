@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/notes/index.ts"],"sourcesContent":["export { NotesModule } from \"./notes.module\";\n"],"names":["NotesModule"],"mappings":";;;;+BAASA;;;eAAAA,wBAAW;;;6BAAQ"}

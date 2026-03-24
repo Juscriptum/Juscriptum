@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/notifications/index.ts"],"sourcesContent":["export { NotificationsModule } from \"./notifications.module\";\n"],"names":["NotificationsModule"],"mappings":";;;;+BAASA;;;eAAAA,wCAAmB;;;qCAAQ"}

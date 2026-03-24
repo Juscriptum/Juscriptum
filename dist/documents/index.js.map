@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/documents/index.ts"],"sourcesContent":["export { DocumentsModule } from \"./documents.module\";\n"],"names":["DocumentsModule"],"mappings":";;;;+BAASA;;;eAAAA,gCAAe;;;iCAAQ"}

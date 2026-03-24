@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/calculations/index.ts"],"sourcesContent":["export { CalculationsModule } from \"./calculations.module\";\n"],"names":["CalculationsModule"],"mappings":";;;;+BAASA;;;eAAAA,sCAAkB;;;oCAAQ"}

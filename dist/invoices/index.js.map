@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/invoices/index.ts"],"sourcesContent":["export { InvoicesModule } from \"./invoices.module\";\n"],"names":["InvoicesModule"],"mappings":";;;;+BAASA;;;eAAAA,8BAAc;;;gCAAQ"}

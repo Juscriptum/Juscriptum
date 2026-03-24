@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../../src/common/runtime/scheduled-tasks.ts"],"sourcesContent":["export function shouldRunScheduledTasks(): boolean {\n  return process.env.RUN_SCHEDULED_JOBS !== \"false\";\n}\n"],"names":["shouldRunScheduledTasks","process","env","RUN_SCHEDULED_JOBS"],"mappings":";;;;+BAAgBA;;;eAAAA;;;AAAT,SAASA;IACd,OAAOC,QAAQC,GAAG,CAACC,kBAAkB,KAAK;AAC5C"}

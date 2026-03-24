@@ -1,0 +1,1 @@
+import{i as t}from"./main-dyocyqnr.js";const n={async getMembers(){return t.get("/users/members")},async updateMember(e,r){return t.patch(`/users/members/${e}`,r)},async getInvitations(){return t.get("/users/invitations")},async createInvitation(e){return t.post("/users/invitations",e)},async revokeInvitation(e){return t.patch(`/users/invitations/${e}/revoke`)}};export{n as t};

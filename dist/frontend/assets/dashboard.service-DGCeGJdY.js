@@ -1,0 +1,1 @@
+import{i as n}from"./main-dyocyqnr.js";const i={async getStats(t){const a=new URLSearchParams;t!=null&&t.days&&a.append("days",t.days.toString()),t!=null&&t.startDate&&a.append("startDate",t.startDate.toISOString()),t!=null&&t.endDate&&a.append("endDate",t.endDate.toISOString());const s=a.toString();return n.get(`/dashboard/stats${s?`?${s}`:""}`)}};export{i as d};

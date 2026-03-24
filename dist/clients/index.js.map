@@ -1,0 +1,1 @@
+{"version":3,"sources":["../../src/clients/index.ts"],"sourcesContent":["export { ClientsModule } from \"./clients.module\";\n"],"names":["ClientsModule"],"mappings":";;;;+BAASA;;;eAAAA,4BAAa;;;+BAAQ"}
